@@ -1,0 +1,106 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lisa"
+version = "0.1.0"
+description = "Interpretable MEG-to-audio retrieval with explicit spatial and temporal filters"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+  { name = "Ilia Semenkov", email = "iliasemenkov@gmail.com" },
+]
+maintainers = [
+  { name = "Ilia Semenkov", email = "iliasemenkov@gmail.com" },
+]
+keywords = [
+  "magnetoencephalography",
+  "MEG",
+  "speech perception",
+  "neural decoding",
+  "interpretable deep learning",
+  "neuroimaging",
+]
+classifiers = [
+  "Intended Audience :: Science/Research",
+  "Natural Language :: English",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+requires-python = ">=3.11"
+# Note: PyTorch is not included here because it requires --index-url for CUDA versions.
+# Install PyTorch separately (see README or scripts/setup_main_env.sh).
+dependencies = [
+  "einops==0.8.1",
+  "librosa==0.11.0",
+  "matplotlib==3.10.0",
+  "mne==1.9.0",
+  "mne-bids==0.16.0",
+  "nibabel==5.3.3",
+  "numpy==1.26.4",
+  "osfclient>=0.0.5",
+  "pandas==2.2.3",
+  "scikit-learn==1.6.1",
+  "scipy==1.15.2",
+  "seaborn==0.13.2",
+  "soundfile==0.13.1",
+  "soxr==0.5.0.post1",
+  "textgrid==1.6.1",
+  "tqdm==4.67.1",
+  "transformers==4.53.1",
+  "wordfreq==3.1.1",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["lisa*"]
+
+[tool.ruff]
+line-length = 88
+
+[tool.ruff.format]
+quote-style = "single"
+
+[project.scripts]
+lisa-train = "lisa.cli.train_model:main"
+lisa-prepare-meg = "lisa.data.prepare_meg_data:main_cli"
+lisa-generate-embeddings = "lisa.data.generate_all_embeddings:main_cli"
+lisa-regen-windows = "lisa.data.regenerate_window_embeddings:main_cli"
+lisa-precompute-pca = "lisa.data.audio_reduction:main_cli"
+lisa-apply-ica = "lisa.data.apply_ica:main_cli"
+lisa-meg-qc = "lisa.plots.meg_qc_check:main"
+lisa-plot-metrics = "lisa.plots.plot_metrics:main_cli"
+lisa-plot-branch-interpretations = "lisa.plots.plot_branch_interpretations:main_cli"
+lisa-combined-cluster-branch-interpretations = "lisa.plots.combined_cluster_branch_interpretations:main"
+lisa-plot-spatial-attention-maps = "lisa.plots.plot_spatial_attention_maps:main_cli"
+lisa-plot-spatial-topography-svd = "lisa.plots.plot_spatial_topography_svd:main_cli"
+lisa-occlusion-feature-analysis = "lisa.plots.occlusion_feature_analysis:main_cli"
+lisa-plot-occlusion-seed-robustness = "lisa.plots.plot_occlusion_seed_robustness:main_cli"
+lisa-plot-retrieval-ablations = "lisa.plots.retrieval_ablation_artifacts:main"
+lisa-plot-segment-duration-ablation = "lisa.plots.plot_segment_duration_ablation:main_cli"
+lisa-plot-temporal-filter-length-ablation = "lisa.plots.plot_temporal_filter_length_ablation:main"
+lisa-scan-runs = "lisa.cli.scan_runs:main_cli"
+lisa-export-parameter-counts = "lisa.cli.export_parameter_counts:main_cli"
+lisa-precompute-word-features = "lisa.cli.precompute_word_features:main_cli"
+lisa-download-osf = "lisa.utils.download_from_osf:main"
+
+[project.optional-dependencies]
+clearml = [
+  "clearml==2.0.2",
+]
+dev = [
+  "ruff>=0.6",
+  "pytest>=7.0",
+]
+
+[project.urls]
+Homepage = "https://ivsemenkov.github.io/LISA/"
+Documentation = "https://ivsemenkov.github.io/LISA/"
+Repository = "https://github.com/ivsemenkov/LISA"
+Issues = "https://github.com/ivsemenkov/LISA/issues"

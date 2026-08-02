@@ -1,0 +1,139 @@
+# -----------------------------------------------------------------------------
+# Python bytecode and interpreter artifacts
+# -----------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# -----------------------------------------------------------------------------
+# Packaging and build outputs
+# -----------------------------------------------------------------------------
+build/
+dist/
+*.egg-info/
+.eggs/
+*.egg
+pip-wheel-metadata/
+
+# -----------------------------------------------------------------------------
+# Virtual environments
+# -----------------------------------------------------------------------------
+.venv/
+venv/
+env/
+ENV/
+.conda/
+
+# -----------------------------------------------------------------------------
+# Test, coverage, type-checking, and linter caches
+# -----------------------------------------------------------------------------
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+junit.xml
+.tox/
+.nox/
+.mypy_cache/
+.pyright/
+.pyre/
+.ruff_cache/
+.hypothesis/
+
+# -----------------------------------------------------------------------------
+# Jupyter
+# -----------------------------------------------------------------------------
+.ipynb_checkpoints/
+.jupyter_cache/
+
+# -----------------------------------------------------------------------------
+# Editors and IDEs
+# -----------------------------------------------------------------------------
+.vscode/
+.idea/
+*.code-workspace
+*.swp
+*.swo
+*~
+
+# -----------------------------------------------------------------------------
+# Operating-system metadata
+# -----------------------------------------------------------------------------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+Desktop.ini
+
+# -----------------------------------------------------------------------------
+# Local configuration, credentials, and secrets
+# -----------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+clearml.conf
+.clearml/
+
+# -----------------------------------------------------------------------------
+# Temporary files, caches, logs, and crash dumps
+# -----------------------------------------------------------------------------
+.cache/
+/tmp/
+/temp/
+*.tmp
+*.temp
+*.bak
+*.log
+core
+core.*
+*.core
+
+# Scheduler logs commonly produced by cluster runs
+slurm-*.out
+slurm-*.err
+job-*.out
+job-*.err
+
+# Local cluster job launchers
+/slurm_jobs/
+
+# -----------------------------------------------------------------------------
+# LISA datasets and generated preprocessing artifacts
+# -----------------------------------------------------------------------------
+# Raw MEG recordings and stimuli, plus the fitted ICA objects, are downloaded
+# from their OSF projects by scripts/download_dataset.sh. Cleaned recordings,
+# embeddings, dataframes, PCA artifacts, linguistic features, and preprocessing
+# logs are generated locally. Keep only the small static coordinate resources
+# required by the code and visualisation utilities.
+/data/**
+!/data/preprocessed/
+!/data/preprocessed/coords/
+!/data/preprocessed/coords/**
+
+# -----------------------------------------------------------------------------
+# LISA experiment and analysis outputs
+# -----------------------------------------------------------------------------
+# Includes experiment directories, checkpoints, metrics, saved filters,
+# per-window retrieval results, plots, cluster assignments, and registries.
+/outputs/
+
+# Logs created by dataset download and preparation scripts.
+/logs/
+
+# Optional local output roots sometimes used for ad-hoc or cluster runs.
+/experiments/
+/results/
+/runs/
+/checkpoints/
+/artifacts/
+
+# ClearML offline-mode storage, when configured inside the repository.
+/clearml_offline/
+/clearml-cache/
+
+# MFA files
+/.mfa_root/
