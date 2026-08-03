@@ -2,10 +2,351 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>LISA</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#102a30">
+  <meta name="description" content="LISA is a compact, interpretable neural decoder for retrieving perceived speech from non-invasive MEG recordings.">
+  <meta property="og:type" content="website">
+  <meta property="og:title" content="Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the Stimulus Features That Drive Retrieval">
+  <meta property="og:description" content="A compact MEG-to-audio decoder whose learned weights map back to cortical sources and temporal dynamics.">
+  <meta property="og:image" content="https://ivsemenkov.github.io/LISA/assets/architecture.png">
+  <meta property="og:url" content="https://ivsemenkov.github.io/LISA/">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://ivsemenkov.github.io/LISA/">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20rx=%2216%22%20fill=%22%23102a30%22/%3E%3Cpath%20d=%22M18%2015v34h28v-8H27V15z%22%20fill=%22%23f5c26b%22/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="styles.css">
+  <title>Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the Stimulus Features That Drive Retrieval | LISA</title>
 </head>
-<body>
-  <h1>LISA</h1>
-  <p>Project page coming soon.</p>
+<body id="top">
+  <a class="skip-link" href="#main-content">Skip to content</a>
+
+  <header class="site-header">
+    <div class="nav-wrap">
+      <a class="brand" href="#top" aria-label="LISA home">
+        <span class="brand-mark" aria-hidden="true">L</span>
+        <span>LISA</span>
+      </a>
+      <button class="nav-toggle" type="button" aria-expanded="false" aria-controls="site-nav">
+        <span class="sr-only">Toggle navigation</span>
+        <span></span><span></span>
+      </button>
+      <nav class="site-nav" id="site-nav" aria-label="Primary navigation">
+        <a href="#overview">Overview</a>
+        <a href="#method">Method</a>
+        <a href="#findings">Findings</a>
+        <a href="#resources">Resources</a>
+        <a href="#citation">Citation</a>
+        <a class="nav-paper" href="#citation">Publication</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="main-content">
+    <section class="hero" aria-labelledby="hero-title">
+      <div class="hero-orbit orbit-one" aria-hidden="true"></div>
+      <div class="hero-orbit orbit-two" aria-hidden="true"></div>
+      <div class="shell hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow"><span>Research project</span> MEG · Speech · Interpretability</p>
+          <h1 id="hero-title">Interpretable MEG Decoding of <em>Perceived Speech</em>:<span class="hero-title-detail"> Cortical Sources and the Stimulus Features That Drive Retrieval</span></h1>
+          <p class="hero-lead">
+            LISA is a compact neural decoder that retrieves heard speech from brain activity and keeps a path back to the cortical sources, temporal dynamics, and stimulus features behind each decision.
+          </p>
+          <div class="authors" role="group" aria-label="Authors">
+            <a href="https://orcid.org/0000-0003-1515-7062">Ilia Semenkov</a>
+            <a href="https://orcid.org/0000-0002-6040-2154">Daria Kleeva</a>
+            <a href="https://orcid.org/0000-0003-1667-9006">Ivan Dakhtin</a>
+            <a href="https://orcid.org/0009-0004-8681-5848">Zarina Maksudova</a>
+            <a href="https://orcid.org/0000-0001-8827-9429">Alex Ossadtchi</a>
+          </div>
+          <p class="affiliations">AXXX · HSE University · ITMO University</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#citation">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 2h8l4 4v16H6zM14 2v5h5M9 13h6M9 17h6"/></svg>
+              Citation status
+            </a>
+            <a class="button button-secondary" href="https://github.com/ivsemenkov/LISA">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M9 19c-4 1.2-4-2-6-2.5m12 4.5v-3.1c0-.9.1-1.6-.4-2.2 3-.3 6.1-1.5 6.1-6.7 0-1.5-.5-2.7-1.4-3.7.1-.4.6-1.8-.1-3.7 0 0-1.1-.4-3.8 1.4a13 13 0 0 0-6.8 0C5.9 1.2 4.8 1.6 4.8 1.6c-.7 1.9-.2 3.3-.1 3.7A5.2 5.2 0 0 0 3.3 9c0 5.2 3.1 6.4 6.1 6.7-.4.5-.5 1.1-.4 2.2V21"/></svg>
+              View code
+            </a>
+          </div>
+        </div>
+
+        <aside class="hero-note" aria-label="Research question">
+          <span class="note-index">01</span>
+          <p class="note-label">The question</p>
+          <p>Can a decoder be accurate enough to retrieve speech, yet structured enough to explain <strong>where</strong> and <strong>when</strong> its evidence arises?</p>
+        </aside>
+      </div>
+
+      <div class="shell architecture-wrap">
+        <figure class="architecture-card">
+          <div class="figure-kicker"><span>Model overview</span><span>3 s MEG → audio embedding</span></div>
+          <div class="architecture-scroll media-frame">
+            <a href="assets/architecture.png" aria-label="Open the LISA architecture diagram at full resolution">
+              <img src="assets/architecture.png" width="1859" height="717" alt="LISA architecture: MEG passes through spatial attention, subject-specific spatial filters, temporal filters, and a compact convolutional decoder to produce an audio-aligned embedding.">
+            </a>
+          </div>
+          <figcaption>A 3-second, 208-channel MEG segment passes through a geometry-aware front end, 25 interpretable spatiotemporal branches, and a two-block convolutional decoder.</figcaption>
+        </figure>
+      </div>
+    </section>
+
+    <section class="metrics" aria-label="Key results">
+      <div class="shell metric-grid">
+        <div>
+          <strong>39.75<span> ± 0.34%</span></strong>
+          <p>Top-1 accuracy among 1,005 candidate speech segments</p>
+          <small>Chance: 0.10%; mean across six trained solutions</small>
+        </div>
+        <div>
+          <strong>70.4<span>%</span></strong>
+          <p>Top-10 accuracy among the same 1,005 candidates</p>
+          <small>Chance: 1.0%</small>
+        </div>
+        <div>
+          <strong>486,619</strong>
+          <p>trainable parameters in the complete MEG decoder</p>
+          <small>The decoder portion uses about 1/20 as many parameters as <a href="https://arxiv.org/abs/2208.12266">Défossez et al.</a></small>
+        </div>
+        <div>
+          <strong>15 <span class="metric-word">of</span> 19</strong>
+          <p>tested stimulus features contribute to retrieval</p>
+          <small>Paired MEG occlusion; FWER-corrected</small>
+        </div>
+      </div>
+    </section>
+
+    <section class="section overview" id="overview" aria-labelledby="overview-title">
+      <div class="shell">
+        <div class="section-heading section-heading-wide overview-heading">
+          <p class="section-number">01 / Overview</p>
+          <h2 id="overview-title">Accurate retrieval does not explain what was decoded.</h2>
+        </div>
+        <div class="overview-argument">
+          <article>
+            <p class="argument-label">The problem</p>
+            <h3>Conventional decoders stop at performance.</h3>
+            <p>Deep networks can match short MEG segments to the speech a person is hearing, but their learned representations do not correspond to cortical locations, neural rhythms, or time courses. A correct retrieval therefore says little about the neural evidence that produced it.</p>
+          </article>
+          <article>
+            <p class="argument-label">LISA’s answer</p>
+            <h3>Make the evidence readable by construction.</h3>
+            <p>LISA uses a physically grounded, factorized front end whose spatial and temporal weights can be converted into source patterns and dynamics. Paired MEG interventions then test which properties of the speech stream actually support retrieval.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section method" id="method" aria-labelledby="method-title">
+      <div class="shell">
+        <div class="section-heading section-heading-wide">
+          <p class="section-number">02 / Method</p>
+          <h2 id="method-title">Physics first. Then physiology. Then retrieval.</h2>
+          <p>Each constraint preserves a direct interpretation without giving up the expressive power needed for natural speech.</p>
+        </div>
+
+        <div class="method-grid">
+          <article class="method-card">
+            <div class="method-icon" aria-hidden="true">
+              <svg viewBox="0 0 64 64"><circle cx="32" cy="32" r="22"/><path d="M10 32h44M32 10c8 7 12 14 12 22S40 47 32 54c-8-7-12-14-12-22S24 17 32 10zM15 20c12 5 22 5 34 0M15 44c12-5 22-5 34 0"/></svg>
+            </div>
+            <span class="card-number">01</span>
+            <h3>Geometry-aware spatial attention</h3>
+            <p>Spherical harmonics parameterize attention directly on the three-dimensional MEG helmet instead of flattening the sensor layout.</p>
+          </article>
+          <article class="method-card">
+            <div class="method-icon" aria-hidden="true">
+              <svg viewBox="0 0 64 64"><path d="M8 14h48M8 32h48M8 50h48"/><circle cx="20" cy="14" r="5"/><circle cx="43" cy="32" r="5"/><circle cx="29" cy="50" r="5"/></svg>
+            </div>
+            <span class="card-number">02</span>
+            <h3>Interpretable branches</h3>
+            <p>Twenty-five subject-specific branches pair spatial filters with 150 ms temporal kernels, matching each branch to a source in space and time.</p>
+          </article>
+          <article class="method-card">
+            <div class="method-icon" aria-hidden="true">
+              <svg viewBox="0 0 64 64"><path d="M8 36c7 0 7-16 14-16s7 24 14 24 7-28 14-28 7 20 7 20M8 50h49"/></svg>
+            </div>
+            <span class="card-number">03</span>
+            <h3>Compact contrastive decoder</h3>
+            <p>Two residual convolutional blocks align three-second MEG segments with wav2vec 2.0 audio embeddings using a CLIP-style objective.</p>
+          </article>
+        </div>
+
+        <div class="pipeline" role="group" aria-label="LISA processing pipeline">
+          <div><span>208</span> MEG sensors</div>
+          <i aria-hidden="true">→</i>
+          <div><span>270</span> virtual channels</div>
+          <i aria-hidden="true">→</i>
+          <div><span>25</span> interpretable branches</div>
+          <i aria-hidden="true">→</i>
+          <div><span>2</span> residual blocks</div>
+          <i aria-hidden="true">→</i>
+          <div><span>768 × 149</span> aligned embedding</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section findings" id="findings" aria-labelledby="findings-title">
+      <div class="shell">
+        <div class="section-heading section-heading-wide findings-heading">
+          <p class="section-number">03 / Findings</p>
+          <h2 id="findings-title">From a correct match back to its neural evidence.</h2>
+        </div>
+
+        <article class="finding-wide finding-sources">
+          <div class="finding-copy">
+            <p class="finding-index">Finding 01</p>
+            <h3>Learned weights recover a speech-perception network.</h3>
+            <p>Spatial patterns projected to source space identify generators in bilateral auditory cortex, medial temporal regions, and frontal cortex. Left-localized branches carry higher-frequency rhythmic components not evident on the right.</p>
+            <ul class="plain-list">
+              <li>Spatial filters are converted to activation patterns.</li>
+              <li>Temporal kernels reveal branch-specific dynamics.</li>
+              <li>Source estimates land on a shared cortical template.</li>
+            </ul>
+          </div>
+          <figure class="paper-figure source-figure">
+            <div class="figure-viewport media-frame">
+              <a href="assets/cortical-sources.png" aria-label="Open the cortical source figure at full resolution">
+                <img src="assets/cortical-sources.png" loading="lazy" width="2134" height="814" alt="Axial, coronal, and sagittal views showing fitted source dipoles concentrated around bilateral auditory, temporal, and frontal regions.">
+              </a>
+            </div>
+            <figcaption>Dominant dipoles from the leading cross-subject spatial patterns, shown in axial, coronal, and sagittal views.</figcaption>
+          </figure>
+        </article>
+
+        <figure class="paper-figure atlas-figure">
+          <div class="figure-heading">
+            <div>
+              <p class="finding-index">Inside the branches</p>
+              <h3>Space, time, rhythm, and source remain connected.</h3>
+            </div>
+            <p>Each column follows one learned branch cluster from its sensor topography through its temporal response and spectrum to a cortical source estimate.</p>
+          </div>
+          <div class="figure-viewport media-frame">
+            <a href="assets/interpretable-branches.png" aria-label="Open the complete branch-cluster figure at full resolution">
+              <img src="assets/interpretable-branches.png" loading="lazy" width="3507" height="1890" alt="Six representative learned branch clusters, each shown from sensor topography through temporal pattern and spectrum to cortical source estimates.">
+            </a>
+          </div>
+          <figcaption>Six representative clusters from the main 25-branch model. Every column preserves the complete path from sensor space to source space.</figcaption>
+        </figure>
+
+        <article class="finding-wide finding-features">
+          <div class="finding-copy">
+            <p class="finding-index">Finding 02</p>
+            <h3>The decoder relies most on acoustic state and transitions.</h3>
+            <p>Paired MEG occlusion compares matched replacements drawn from feature-present and feature-absent intervals. Fifteen of nineteen tested features contribute reliably; silence, sound intensity, vowels, and acoustic onsets produce the largest effects.</p>
+            <p class="finding-note"><strong>A revealing reversal:</strong> replacing random-word-list activity with narrative MEG improves retrieval, suggesting that coherent speech evokes more recoverable information.</p>
+          </div>
+          <figure class="paper-figure feature-figure">
+            <div class="figure-viewport media-frame">
+              <a href="assets/feature-effects.png" aria-label="Open the stimulus-feature intervention figure at full resolution">
+                <img src="assets/feature-effects.png" loading="lazy" width="2588" height="1609" alt="Participant-level rank differences for nineteen stimulus-feature interventions, with null intervals and significance markers.">
+              </a>
+            </div>
+            <figcaption>Gray points show participants, diamonds show observed effects, and green intervals show the paired null distribution. Positive values mean that feature-absent replacement worsened retrieval more than the matched control. Significance markers reflect one-sided tests for positive effects.</figcaption>
+          </figure>
+        </article>
+
+        <article class="finding-wide finding-compression">
+          <div class="finding-copy compact-copy">
+            <p class="finding-index">Finding 03</p>
+            <h3>The recoverable target space is surprisingly small.</h3>
+            <p>A projection learned with the retrieval objective compresses the 768-dimensional wav2vec target to about twelve dimensions with essentially no loss. Unsupervised PCA degrades much sooner, showing that MEG-relevant directions are not simply the directions of greatest audio variance.</p>
+            <div class="mini-stat"><strong>64×</strong><span>feature compression<br>without accuracy loss</span></div>
+          </div>
+          <figure class="paper-figure compression-figure">
+            <div class="figure-viewport media-frame">
+              <a href="assets/feature-compression.png" aria-label="Open the feature-compression figure at full resolution">
+                <img src="assets/feature-compression.png" loading="lazy" width="2843" height="1113" alt="Top-1 and Top-10 accuracy across embedding dimensions. Learned linear reduction remains near full-model accuracy down to roughly twelve dimensions, while PCA degrades earlier.">
+              </a>
+            </div>
+            <figcaption>Task-driven feature reduction preserves retrieval in a compact subspace.</figcaption>
+          </figure>
+        </article>
+
+        <article class="finding-wide duration-card">
+          <div class="duration-copy">
+            <p class="finding-index">Additional result</p>
+            <h3>Accuracy rises steadily with segment duration.</h3>
+            <p>For the two-block model, Top-1 retrieval climbs from <strong>14.37%</strong> at 1.5 seconds to <strong>62.20%</strong> at 5 seconds. The monotonic trend holds with zero, two, and five downstream convolutional blocks.</p>
+          </div>
+          <figure class="paper-figure duration-figure">
+            <div class="figure-viewport media-frame">
+              <a href="assets/segment-duration.png" aria-label="Open the segment-duration figure at full resolution">
+                <img src="assets/segment-duration.png" loading="lazy" width="2100" height="1500" alt="Top-1 and Top-10 retrieval accuracy from 1.5 to 5 second MEG segments for decoders with zero, two, and five convolutional blocks.">
+              </a>
+            </div>
+            <figcaption>All durations use the same 991-candidate test set. The monotonic trend holds for decoders with zero, two, and five convolutional blocks.</figcaption>
+          </figure>
+        </article>
+      </div>
+    </section>
+
+    <section class="section resources" id="resources" aria-labelledby="resources-title">
+      <div class="shell resources-grid">
+        <div class="section-heading">
+          <p class="section-number">04 / Resources</p>
+          <h2 id="resources-title">Read, reproduce, and adapt.</h2>
+        </div>
+        <div class="resource-list">
+          <div class="resource-pending">
+            <span class="resource-type">PDF</span>
+            <span><strong>Preprint</strong><small>Preprint link pending arXiv publication</small></span>
+            <i aria-hidden="true">—</i>
+          </div>
+          <a href="https://github.com/ivsemenkov/LISA">
+            <span class="resource-type">GIT</span>
+            <span><strong>Source code</strong><small>Training, evaluation, and analysis</small></span>
+            <i aria-hidden="true">↗</i>
+          </a>
+          <a href="https://github.com/ivsemenkov/LISA/blob/main/documentation/REPRODUCE.md">
+            <span class="resource-type">DOC</span>
+            <span><strong>Reproduce the paper</strong><small>Complete experiment, table, and figure workflow</small></span>
+            <i aria-hidden="true">↗</i>
+          </a>
+          <a href="https://github.com/ivsemenkov/LISA/blob/main/documentation/ADAPTING.md">
+            <span class="resource-type">DOC</span>
+            <span><strong>Use LISA on your data</strong><small>Adapt the encoder to another task or dataset</small></span>
+            <i aria-hidden="true">↗</i>
+          </a>
+          <a href="https://doi.org/10.1038/s41597-023-02752-5">
+            <span class="resource-type">DATA</span>
+            <span><strong>MEG-MASC</strong><small>Naturalistic speech MEG dataset</small></span>
+            <i aria-hidden="true">↗</i>
+          </a>
+        </div>
+      </div>
+    </section>
+
+    <section class="section citation" id="citation" aria-labelledby="citation-title">
+      <div class="shell citation-grid">
+        <div>
+          <p class="section-number">05 / Citation</p>
+          <h2 id="citation-title">If this work helps your research, please cite it.</h2>
+        </div>
+        <div class="citation-status">
+          <p class="citation-status-label">Preprint forthcoming</p>
+          <p>Preprint link and citation details pending arXiv publication.</p>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <footer class="site-footer">
+    <div class="shell footer-grid">
+      <a class="brand footer-brand" href="#top"><span class="brand-mark" aria-hidden="true">L</span><span>LISA</span></a>
+      <p>Linear · Interpretable · Slim · Aware</p>
+      <div class="footer-links">
+        <a href="#citation">Citation</a>
+        <a href="#resources">Resources</a>
+        <a href="https://github.com/ivsemenkov/LISA">Code</a>
+        <a href="mailto:iliasemenkov@gmail.com">Contact</a>
+      </div>
+      <p class="copyright">© 2026 The Authors</p>
+    </div>
+  </footer>
+
+  <script src="script.js"></script>
 </body>
 </html>

@@ -15,6 +15,11 @@ This repository contains the preprocessing, training, evaluation, and analysis
 code used for the MEG-MASC experiments, together with reusable LISA modules for
 other EEG/MEG tasks.
 
+> **Paper status.** This is the official implementation of
+> *Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the
+> Stimulus Features That Drive Retrieval*. See the [project page](https://ivsemenkov.github.io/LISA/).
+> Preprint link and citation pending arXiv publication.
+
 ## Start here
 
 | Goal | Where to go |
@@ -339,6 +344,8 @@ speech perception from non-invasive brain recordings*,
 [arXiv:2208.12266](https://arxiv.org/abs/2208.12266). LISA uses independently
 preprocessed MEG-MASC data and introduces a compact, explicitly interpretable
 architecture and accompanying analyses.
+
+**Acknowledgements.** We thank Alexey Voskoboynikov for the original version of the code partly reproducing the results of Défossez et al. (2023).
 
 ## License
 
