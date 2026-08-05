@@ -22,3 +22,22 @@ navLinks.forEach((link) => link.addEventListener('click', closeMenu));
 document.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') closeMenu();
 });
+
+const copyCitationButton = document.querySelector('[data-copy-citation]');
+const citationCode = document.querySelector('#bibtex-citation code');
+const copyCitationLabel = copyCitationButton?.querySelector('span');
+let copyResetTimer;
+
+copyCitationButton?.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(citationCode.textContent.trim());
+    copyCitationLabel.textContent = 'Copied!';
+  } catch {
+    copyCitationLabel.textContent = 'Copy failed';
+  }
+
+  clearTimeout(copyResetTimer);
+  copyResetTimer = window.setTimeout(() => {
+    copyCitationLabel.textContent = 'Copy BibTeX';
+  }, 1800);
+});
