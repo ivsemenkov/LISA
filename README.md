@@ -15,10 +15,10 @@ This repository contains the preprocessing, training, evaluation, and analysis
 code used for the MEG-MASC experiments, together with reusable LISA modules for
 other EEG/MEG tasks.
 
-> **Paper status.** This is the official implementation of
-> *Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the
-> Stimulus Features That Drive Retrieval*. See the [project page](https://ivsemenkov.github.io/LISA/).
-> Preprint link and citation pending arXiv publication.
+> **Publication.** This is the official implementation of
+> [*Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the
+> Stimulus Features That Drive Retrieval*](https://arxiv.org/abs/2608.01481). See the
+> [project page](https://ivsemenkov.github.io/LISA/).
 
 ## Start here
 
@@ -250,10 +250,10 @@ Use `lisa-train --help` for a compact option summary or
 [HYPERPARAMETERS.md](documentation/HYPERPARAMETERS.md) for complete semantics and
 constraints.
 
-## Reproducing the preprint experiments
+## Reproducing the paper experiments
 
 [REPRODUCE.md](documentation/REPRODUCE.md) is the source of truth for the
-preprint's experiment workflow. It contains:
+paper's experiment workflow. It contains:
 
 - preprocessing checks and canonical sample counts;
 - the complete 210-run experiment matrix;
@@ -326,7 +326,7 @@ unit-test scope.
 
 ```text
 README.md                       project entry point and quickstart
-documentation/REPRODUCE.md      complete preprint experiment workflow
+documentation/REPRODUCE.md      complete paper experiment workflow
 documentation/ARCHITECTURE.md   model equations and tensor flow
 documentation/HYPERPARAMETERS.md
 documentation/ADAPTING.md       reuse on other tasks and datasets
@@ -336,16 +336,41 @@ src/lisa/                       package source and command-line tools
 tests/                          unit and regression tests
 ```
 
+## Citation
+
+If this work helps your research, please cite:
+
+[Semenkov, I., Kleeva, D., Dakhtin, I., Maksudova, Z., & Ossadtchi, A. (2026).
+*Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the
+Stimulus Features That Drive Retrieval*. arXiv:2608.01481
+(cs.LG).](https://arxiv.org/abs/2608.01481)
+
+```bibtex
+@misc{semenkov2026interpretablemegdecodingperceived,
+      title={Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the Stimulus Features That Drive Retrieval},
+      author={Ilia Semenkov and Daria Kleeva and Ivan Dakhtin and Zarina Maksudova and Alex Ossadtchi},
+      year={2026},
+      eprint={2608.01481},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2608.01481},
+}
+```
+
 ## Related work
 
 The retrieval formulation and architecture build on the contrastive
-brain-to-audio decoding framework introduced by Défossez et al., *Decoding
-speech perception from non-invasive brain recordings*,
-[arXiv:2208.12266](https://arxiv.org/abs/2208.12266). LISA uses independently
-preprocessed MEG-MASC data and introduces a compact, explicitly interpretable
-architecture and accompanying analyses.
+brain-to-audio decoding framework introduced by
+[Défossez, A., Caucheteux, C., Rapin, J., Kabeli, O., & King, J.-R. (2023).
+*Decoding speech perception from non-invasive brain recordings*. Nature Machine
+Intelligence, 5, 1097–1107.](https://doi.org/10.1038/s42256-023-00714-5) LISA
+uses independently preprocessed MEG-MASC data and introduces a compact,
+explicitly interpretable architecture and accompanying analyses.
 
-**Acknowledgements.** We thank Alexey Voskoboynikov for the original version of the code partly reproducing the results of Défossez et al. (2023).
+## Acknowledgements
+
+We thank Alexey Voskoboynikov for the original version of the code partly
+reproducing the results of Défossez et al. (2023).
 
 ## License
 

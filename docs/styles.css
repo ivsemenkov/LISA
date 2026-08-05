@@ -407,8 +407,7 @@ h3 { font-size: clamp(1.5rem, 2.4vw, 2.25rem); font-weight: 650; }
 .resources { background: var(--paper-deep); border-block: 1px solid var(--line); }
 .resources-grid { display: grid; grid-template-columns: minmax(280px, 0.8fr) minmax(460px, 1.2fr); gap: clamp(60px, 10vw, 150px); }
 .resource-list { border-top: 1px solid var(--line); }
-.resource-list > a,
-.resource-list > .resource-pending {
+.resource-list > a {
   display: grid;
   grid-template-columns: 62px 1fr auto;
   gap: 22px;
@@ -418,8 +417,6 @@ h3 { font-size: clamp(1.5rem, 2.4vw, 2.25rem); font-weight: 650; }
   text-decoration: none;
 }
 .resource-list > a:hover strong { color: var(--green); }
-.resource-pending { color: var(--ink-soft); }
-.resource-pending .resource-type, .resource-pending i { opacity: 0.55; }
 .resource-type { color: var(--coral); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; font-weight: 800; letter-spacing: 0.08em; }
 .resource-list strong { display: block; font-size: 1.03rem; transition: color 180ms ease; }
 .resource-list small { display: block; color: var(--ink-soft); font-size: 0.78rem; }
@@ -436,6 +433,19 @@ h3 { font-size: clamp(1.5rem, 2.4vw, 2.25rem); font-weight: 650; }
   border-radius: 18px;
 }
 .citation-status p { margin: 0; color: rgba(255, 255, 255, 0.76); }
+.citation-status .citation-reference { font-size: 0.95rem; line-height: 1.65; }
+.citation-reference a { text-decoration-color: rgba(245, 198, 111, 0.55); }
+.citation-status pre {
+  overflow-x: auto;
+  margin: 22px 0 0;
+  padding: 20px;
+  color: rgba(255, 255, 255, 0.84);
+  background: #06171a;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  font-size: 0.72rem;
+  line-height: 1.6;
+}
 .citation-status .citation-status-label {
   margin-bottom: 8px;
   color: var(--amber-soft);
@@ -546,8 +556,7 @@ h3 { font-size: clamp(1.5rem, 2.4vw, 2.25rem); font-weight: 650; }
   .media-frame img { max-width: none; }
   .duration-card { padding-top: 42px; }
   .duration-figure { max-width: none; }
-  .resource-list > a,
-  .resource-list > .resource-pending { grid-template-columns: 48px 1fr auto; gap: 12px; }
+  .resource-list > a { grid-template-columns: 48px 1fr auto; gap: 12px; }
   .footer-grid { grid-template-columns: 1fr; gap: 18px; }
   .copyright { margin-top: 8px !important; }
 }
@@ -562,6 +571,7 @@ h3 { font-size: clamp(1.5rem, 2.4vw, 2.25rem); font-weight: 650; }
   body, .hero, .method, .citation { color: #000; background: #fff; }
   .hero { padding: 30px 0; }
   .citation-status { background: #fff; }
+  .citation-status pre { color: #000; background: #fff; border-color: #ccc; }
   .hero-lead, .citation-status p { color: #333; }
   .section { padding: 36px 0; break-inside: avoid; }
 }
