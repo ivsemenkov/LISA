@@ -1,6 +1,12 @@
 # LISA: Interpretable MEG-to-Audio Retrieval
 
 <p align="center">
+  <a href="https://arxiv.org/abs/2608.01481"><img src="https://img.shields.io/badge/arXiv-2608.01481-B31B1B?style=flat&amp;logo=arxiv&amp;logoColor=white" alt="Read the paper on arXiv"></a>
+  <a href="https://ivsemenkov.github.io/LISA/"><img src="https://img.shields.io/badge/-Project_Website-1F6FEB?style=flat&amp;logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIiPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjkiLz48cGF0aCBkPSJNMyAxMmgxOE0xMiAzYzMgMyA0LjUgNiA0LjUgOVMxNSAxOCAxMiAyMWMtMy0zLTQuNS02LTQuNS05UzkgNiAxMiAzWiIvPjwvZz48L3N2Zz4%3D" alt="Visit the LISA project website"></a>
+  <a href="https://huggingface.co/papers/2608.01481"><img src="https://img.shields.io/badge/Hugging_Face-%232_Paper_of_the_Day-FFD21E?style=flat&amp;logo=huggingface&amp;logoColor=FFD21E" alt="Hugging Face: #2 Paper of the Day"></a>
+</p>
+
+<p align="center">
   <a href="documentation/assets/LISA.png">
     <img src="documentation/assets/LISA.png" alt="LISA architecture and analysis pipeline" width="900">
   </a>

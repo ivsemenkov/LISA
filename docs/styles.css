@@ -260,6 +260,29 @@ h3 { font-size: clamp(1.5rem, 2.4vw, 2.25rem); font-weight: 650; }
 .button-secondary { color: var(--white); border-color: rgba(255, 255, 255, 0.28); }
 .button-secondary:hover { border-color: rgba(255, 255, 255, 0.6); background: rgba(255, 255, 255, 0.06); }
 
+.paper-accolade {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  max-width: 100%;
+  margin-top: 18px;
+  padding: 8px 13px 8px 9px;
+  color: var(--night);
+  background: var(--amber-soft);
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 650;
+  text-decoration: none;
+  transition: transform 180ms ease, background 180ms ease;
+}
+.paper-accolade:hover { background: #ffd78c; transform: translateY(-2px); }
+.paper-accolade-mark { font-size: 1rem; line-height: 1; }
+.paper-accolade-label {
+  padding-right: 9px;
+  border-right: 1px solid rgba(16, 42, 48, 0.25);
+}
+.paper-accolade strong { font-weight: 750; }
+
 .hero-note {
   position: relative;
   padding: 32px 26px 26px;
