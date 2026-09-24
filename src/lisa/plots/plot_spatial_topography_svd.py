@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import math
+import warnings
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Sequence
@@ -13,8 +14,10 @@ import numpy as np
 from lisa.plots.plot_style import FULL_WIDTH_IN, paper_topomap, publication_style
 from lisa.utils.constants import (
     CLEAN_DATA_DIR,
+    DATA_ROOT,
     EXPERIMENTS_DIR,
     N_SUBJECTS,
+    OUTPUTS_DIR,
     PLOTS_DIR,
     PREPROCESSED_DATA_DIR,
 )
@@ -23,6 +26,7 @@ from lisa.utils.validators import validate_run_group
 
 
 EPS = 1e-12
+SVD_NORMALIZATIONS = ('raw', 'row_l2', 'both')
 TEMPORAL_FILTER_SUFFIX = {
     True: '_dtf',
     False: '_raw_tf',
@@ -87,14 +91,22 @@ def validate_energy_threshold(energy_threshold: float) -> None:
         raise ValueError(f'energy_threshold must be in (0, 1], got {energy_threshold}.')
 
 
+def validate_svd_normalization(normalization: str) -> None:
+    if normalization not in SVD_NORMALIZATIONS:
+        raise ValueError(
+            "svd_normalization must be 'raw', 'row_l2', or 'both', "
+            f'got {normalization!r}.'
+        )
+
+
 def row_l2_normalize(topographies: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     topographies = np.asarray(topographies, dtype=np.float64)
     _assert_finite('topographies_before_row_l2_normalization', topographies)
     norms = np.linalg.norm(topographies, axis=1, keepdims=True)
-    bad = np.where(norms[:, 0] <= EPS)[0]
+    bad = np.where(norms[:, 0] == 0.0)[0]
     if bad.size:
         raise ValueError(
-            'Cannot row-L2-normalize near-zero topographies at item indices: '
+            'Cannot row-L2-normalize zero topographies at item indices: '
             f'{bad.tolist()}'
         )
     normalized = topographies / norms
@@ -116,12 +128,14 @@ def compute_svd_result(
         topographies,
         full_matrices=False,
     )
-    energies = singular_values**2
-    total_energy = float(np.sum(energies))
-    if total_energy <= EPS:
-        raise ValueError('Cannot compute explained energy for a near-zero matrix.')
+    max_singular_value = (
+        float(singular_values[0]) if singular_values.size else 0.0
+    )
+    if max_singular_value == 0.0:
+        raise ValueError('Cannot compute explained energy for a zero matrix.')
 
-    explained_energy = energies / total_energy
+    relative_energies = (singular_values / max_singular_value) ** 2
+    explained_energy = relative_energies / np.sum(relative_energies)
     cumulative_energy = np.cumsum(explained_energy)
     n_components = int(np.searchsorted(cumulative_energy, energy_threshold) + 1)
 
@@ -145,40 +159,50 @@ def compute_svd_result(
 def compute_svd_variants(
     stack: TopographyStack,
     energy_threshold: float,
+    normalization: str = 'both',
 ) -> tuple[SVDVariantResult, ...]:
-    normalized_filters, filter_row_norms = row_l2_normalize(stack.spatial_filters)
-    normalized_patterns, pattern_row_norms = row_l2_normalize(stack.spatial_patterns)
+    validate_svd_normalization(normalization)
+    include_raw = normalization in ('raw', 'both')
+    include_row_l2 = normalization in ('row_l2', 'both')
 
-    variants = [
-        SVDVariantResult(
-            key='raw',
-            spatial_filters=stack.spatial_filters,
-            spatial_patterns=stack.spatial_patterns,
-            filter_result=compute_svd_result(
-                topographies=stack.spatial_filters,
-                energy_threshold=energy_threshold,
-            ),
-            pattern_result=compute_svd_result(
-                topographies=stack.spatial_patterns,
-                energy_threshold=energy_threshold,
-            ),
-        ),
-        SVDVariantResult(
-            key='row_l2',
-            spatial_filters=normalized_filters,
-            spatial_patterns=normalized_patterns,
-            filter_result=compute_svd_result(
-                topographies=normalized_filters,
-                energy_threshold=energy_threshold,
-            ),
-            pattern_result=compute_svd_result(
-                topographies=normalized_patterns,
-                energy_threshold=energy_threshold,
-            ),
-            filter_row_norms=filter_row_norms,
-            pattern_row_norms=pattern_row_norms,
-        ),
-    ]
+    variants = []
+    if include_raw:
+        variants.append(
+            SVDVariantResult(
+                key='raw',
+                spatial_filters=stack.spatial_filters,
+                spatial_patterns=stack.spatial_patterns,
+                filter_result=compute_svd_result(
+                    topographies=stack.spatial_filters,
+                    energy_threshold=energy_threshold,
+                ),
+                pattern_result=compute_svd_result(
+                    topographies=stack.spatial_patterns,
+                    energy_threshold=energy_threshold,
+                ),
+            )
+        )
+
+    if include_row_l2:
+        normalized_filters, filter_row_norms = row_l2_normalize(stack.spatial_filters)
+        normalized_patterns, pattern_row_norms = row_l2_normalize(stack.spatial_patterns)
+        variants.append(
+            SVDVariantResult(
+                key='row_l2',
+                spatial_filters=normalized_filters,
+                spatial_patterns=normalized_patterns,
+                filter_result=compute_svd_result(
+                    topographies=normalized_filters,
+                    energy_threshold=energy_threshold,
+                ),
+                pattern_result=compute_svd_result(
+                    topographies=normalized_patterns,
+                    energy_threshold=energy_threshold,
+                ),
+                filter_row_norms=filter_row_norms,
+                pattern_row_norms=pattern_row_norms,
+            )
+        )
 
     if stack.demeaned_temporal_spatial_patterns is not None:
         demeaned_patterns = np.asarray(
@@ -192,11 +216,8 @@ def compute_svd_variants(
                 f'patterns shape {expected_shape}, got {demeaned_patterns.shape}.'
             )
         _assert_finite('demeaned_temporal_spatial_patterns', demeaned_patterns)
-        normalized_demeaned_patterns, demeaned_pattern_row_norms = row_l2_normalize(
-            demeaned_patterns
-        )
-        variants.extend(
-            [
+        if include_raw:
+            variants.append(
                 SVDVariantResult(
                     key='dtf_raw',
                     spatial_filters=stack.spatial_filters,
@@ -209,7 +230,13 @@ def compute_svd_variants(
                         topographies=demeaned_patterns,
                         energy_threshold=energy_threshold,
                     ),
-                ),
+                )
+            )
+        if include_row_l2:
+            normalized_demeaned_patterns, demeaned_pattern_row_norms = row_l2_normalize(
+                demeaned_patterns
+            )
+            variants.append(
                 SVDVariantResult(
                     key='dtf_row_l2',
                     spatial_filters=normalized_filters,
@@ -224,9 +251,8 @@ def compute_svd_variants(
                     ),
                     filter_row_norms=filter_row_norms,
                     pattern_row_norms=demeaned_pattern_row_norms,
-                ),
-            ]
-        )
+                )
+            )
 
     return tuple(variants)
 
@@ -240,9 +266,7 @@ def collect_spatial_topographies(
     offset_gap: float,
     meg_format: str,
     data_root: str | Path,
-    raw_meg: bool,
     preprocessed_meg_path: str | Path,
-    preprocess: bool,
     demean_temporal_filters_enabled: bool,
 ) -> TopographyStack:
     from tqdm import tqdm
@@ -251,6 +275,7 @@ def collect_spatial_topographies(
         calculate_spatial_patterns,
         extract_run_filters,
         load_subject_meg_and_raw,
+        physical_spatial_affine,
     )
 
     if not subjects:
@@ -283,7 +308,7 @@ def collect_spatial_topographies(
     reference_ch_names = None
 
     for sub in tqdm(subjects, desc='Extracting subject-branch topographies'):
-        meg, raw = load_subject_meg_and_raw(
+        meg, raw, scale, offset = load_subject_meg_and_raw(
             sub=int(sub),
             ses=ses,
             story_id=story_id,
@@ -291,9 +316,8 @@ def collect_spatial_topographies(
             offset_gap=offset_gap,
             meg_format=meg_format,
             data_root=data_root,
-            raw_meg=raw_meg,
             preprocessed_meg_path=preprocessed_meg_path,
-            preprocess=preprocess,
+            raw_metadata_only=True,
         )
         if reference_info is None:
             reference_info = raw.info.copy()
@@ -304,12 +328,16 @@ def collect_spatial_topographies(
                 'same MEG channel order.'
             )
 
+        weight, _bias = physical_spatial_affine(
+            spatial_weight, None, scale, offset, int(sub)
+        )
         spatial_patterns = calculate_spatial_patterns(
             meg=meg,
-            spatial_filters_weight=spatial_weight,
+            spatial_filters_weight=weight,
             temporal_filters=temporal_filters,
             sub=int(sub),
             filtfilt=filtfilt,
+            channel_pad=offset,
         )
         expected_shape = (n_branches, spatial_weight.shape[2])
         if spatial_patterns.shape != expected_shape:
@@ -318,7 +346,7 @@ def collect_spatial_topographies(
                 f'subject {sub}, got {spatial_patterns.shape}.'
             )
         _assert_finite(f'spatial_patterns_subject_{sub}', spatial_patterns)
-        subject_filters = spatial_weight[int(sub) - 1]
+        subject_filters = weight[int(sub) - 1]
         if subject_filters.shape != expected_shape:
             raise ValueError(
                 f'Expected spatial filters with shape {expected_shape} for '
@@ -349,6 +377,79 @@ def collect_spatial_topographies(
         info=reference_info,
         n_branches=n_branches,
     )
+
+
+def exclude_rough_spatial_items(
+    stack: TopographyStack,
+    *,
+    dirprocess: str | Path | None,
+) -> tuple[TopographyStack, dict[str, object]]:
+    """Drop the same rough participant×branch items used by clustering QC."""
+    from lisa.plots.branch_interpretation import (
+        DEFAULT_MAIN_SPATIAL_ROUGHNESS_MAX,
+        compute_item_spatial_roughness,
+        load_sensor_xy,
+    )
+
+    n_items = int(stack.spatial_patterns.shape[0])
+    if (
+        stack.spatial_filters.shape[0] != n_items
+        or stack.item_subjects.shape[0] != n_items
+        or stack.item_branches.shape[0] != n_items
+    ):
+        raise ValueError(
+            'Participant×branch matrices must share the same item axis before '
+            'roughness QC.'
+        )
+    demeaned = stack.demeaned_temporal_spatial_patterns
+    if demeaned is not None and demeaned.shape[0] != n_items:
+        raise ValueError(
+            'Demeaned-temporal spatial patterns must share the same item axis '
+            'before roughness QC.'
+        )
+
+    roughness = compute_item_spatial_roughness(
+        stack.spatial_patterns,
+        load_sensor_xy(dirprocess),
+    )
+    rough_mask = roughness > DEFAULT_MAIN_SPATIAL_ROUGHNESS_MAX
+    keep_mask = ~rough_mask
+    filtered = TopographyStack(
+        spatial_filters=stack.spatial_filters[keep_mask],
+        spatial_patterns=stack.spatial_patterns[keep_mask],
+        item_subjects=stack.item_subjects[keep_mask],
+        item_branches=stack.item_branches[keep_mask],
+        info=stack.info,
+        n_branches=stack.n_branches,
+        demeaned_temporal_spatial_patterns=(
+            None if demeaned is None else demeaned[keep_mask]
+        ),
+    )
+    n_dropped = int(np.sum(rough_mask))
+    n_retained = int(np.sum(keep_mask))
+    subjects_before = np.unique(stack.item_subjects)
+    subjects_after = np.unique(filtered.item_subjects)
+    if filtered.item_subjects.size:
+        retained_branch_counts = np.bincount(filtered.item_subjects)[subjects_after]
+        min_retained_branches = int(np.min(retained_branch_counts))
+        max_retained_branches = int(np.max(retained_branch_counts))
+    else:
+        min_retained_branches = 0
+        max_retained_branches = 0
+    qc = {
+        'n_items': n_items,
+        'n_dropped_items': n_dropped,
+        'n_rough_items': n_dropped,
+        'n_excluded_items': n_dropped,
+        'n_retained_items': n_retained,
+        'spatial_roughness_threshold': float(DEFAULT_MAIN_SPATIAL_ROUGHNESS_MAX),
+        'exclude_rough': True,
+        'n_subjects_before': int(subjects_before.size),
+        'n_subjects_after': int(subjects_after.size),
+        'min_retained_branches_per_participant': min_retained_branches,
+        'max_retained_branches_per_participant': max_retained_branches,
+    }
+    return filtered, qc
 
 
 def component_table(result: SVDResult, topography_type: str, svd_variant: str):
@@ -800,46 +901,59 @@ def align_topographies_to_forward(
     return aligned
 
 
-def build_fsaverage_forward(
-    info: object,
-    trans_path: str | Path,
+def source_index_hemisphere(fwd: object, source_index: int) -> str:
+    n_lh = int(fwd['src'][0]['nuse'])
+    n_rh = int(fwd['src'][1]['nuse'])
+    if source_index < 0 or source_index >= n_lh + n_rh:
+        raise ValueError(
+            f'source_index {source_index} is outside the forward source space '
+            f'(n_lh={n_lh}, n_rh={n_rh}).'
+        )
+    return 'lh' if source_index < n_lh else 'rh'
+
+
+def fsaverage_coords_from_head(fwd: object, indices: np.ndarray, trans: object) -> np.ndarray:
+    from mne.transforms import apply_trans
+
+    coords_head = np.atleast_2d(np.asarray(fwd['source_rr'], dtype=np.float64)[indices])
+    return np.atleast_2d(apply_trans(trans, coords_head))
+
+
+def build_participant_fsaverage_forwards(
+    *,
+    template_info: object,
+    scaler_ch_names: Sequence[str],
+    subjects: Sequence[int],
+    session: int,
+    story_id: int,
+    bids_root: str | Path,
     n_jobs: int,
-):
-    import mne
-    from mne.datasets import fetch_fsaverage
+    geometry_cache_dir: str | Path,
+) -> tuple[object, dict[int, tuple[object, object, object, dict]]]:
+    """Shared fsaverage anatomy plus one reconstructed forward per participant."""
+
+    from lisa.data.kit_geometry import prepare_participant_fsaverage_forward
+    from lisa.plots.source_estimation import prepare_source_geometry
 
     validate_positive_int('dipole_n_jobs', n_jobs)
-    trans_path = Path(trans_path)
-    if not trans_path.exists():
-        raise FileNotFoundError(f'Cannot find dipole trans file: {trans_path}')
-
-    fs_dir = Path(fetch_fsaverage(verbose=False))
-    subjects_dir = fs_dir.parent
-    subject = 'fsaverage'
-    src = mne.setup_source_space(
-        subject,
-        spacing='ico4',
-        add_dist=False,
-        subjects_dir=str(subjects_dir),
-        verbose=False,
-    )
-    model = mne.make_bem_model(
-        subject=subject,
-        subjects_dir=str(subjects_dir),
-        verbose=False,
-    )
-    bem = mne.make_bem_solution(model, verbose=False)
-    fwd = mne.make_forward_solution(
-        info,
-        trans=str(trans_path),
-        src=src,
-        bem=bem,
-        eeg=False,
-        meg=True,
-        n_jobs=n_jobs,
-        verbose=False,
-    )
-    return fwd, str(trans_path), subject, str(subjects_dir)
+    anatomy = prepare_source_geometry()
+    cache_dir = Path(geometry_cache_dir)
+    models: dict[int, tuple[object, object, object, dict]] = {}
+    for subject in subjects:
+        models[int(subject)] = prepare_participant_fsaverage_forward(
+            template_info=template_info,
+            scaler_ch_names=scaler_ch_names,
+            bids_root=bids_root,
+            subject=int(subject),
+            session=int(session),
+            task=story_id,
+            src=anatomy.src,
+            bem=anatomy.bem,
+            subjects_dir=anatomy.subjects_dir,
+            cache_dir=cache_dir,
+            n_jobs=n_jobs,
+        )
+    return anatomy, models
 
 
 def fit_svd_pattern_dipoles(
@@ -859,12 +973,11 @@ def fit_svd_pattern_dipoles(
         gain=fwd['sol']['data'],
         music_threshold=music_threshold,
     )
-    if not scan.indices:
-        raise RuntimeError(
-            'No RAP-MUSIC dipoles found for spatial-pattern SVD variant '
-            f'{variant.key!r} with music threshold {music_threshold}.'
-        )
-    coords = fwd['source_rr'][scan.indices]
+    coords = (
+        fwd['source_rr'][scan.indices]
+        if scan.indices
+        else np.empty((0, 3), dtype=np.float64)
+    )
     return {
         'coords': [np.atleast_2d(coords)],
         'vals': [scan.values],
@@ -882,12 +995,12 @@ def fit_svd_pattern_dipoles(
 def plot_dipoles_2d(
     fit_res: dict[str, list],
     *,
-    trans: str,
+    trans: object,
     subject: str,
     subjects_dir: str,
-    color: str,
 ):
     import mne
+    from matplotlib.patches import Patch
 
     coords = np.vstack(fit_res['coords']) if fit_res['coords'] else np.empty((0, 3))
     if coords.size == 0:
@@ -904,13 +1017,15 @@ def plot_dipoles_2d(
         ori=np.zeros((len(coords), 3)),
         gof=np.zeros(len(coords)),
     )
+    left_color, right_color = 'crimson', 'steelblue'
     fig = dipoles.plot_locations(
         trans=trans,
         subject=subject,
         subjects_dir=subjects_dir,
         mode='outlines',
-        color=color,
+        color=[left_color if x < 0.0 else right_color for x in coords[:, 0]],
         show_all=False,
+        show=False,
     )
     fig.set_size_inches(FULL_WIDTH_IN, 2.6, forward=True)
     for ax in fig.axes:
@@ -924,6 +1039,28 @@ def plot_dipoles_2d(
             if line.get_marker() in ('None', 'none', ''):
                 line.set_linewidth(0.7)
                 line.set_color('0.45')
+    legend = fig.axes[1].legend(
+        handles=[
+            Patch(facecolor=left_color, edgecolor='none', label='Left'),
+            Patch(facecolor=right_color, edgecolor='none', label='Right'),
+        ],
+        loc='upper center',
+        bbox_to_anchor=(0.5, -0.28),
+        ncol=2,
+        frameon=True,
+        fancybox=True,
+        framealpha=1.0,
+        facecolor='white',
+        edgecolor='0.65',
+        borderpad=0.45,
+        handlelength=0.9,
+        handleheight=0.7,
+        handletextpad=0.5,
+        columnspacing=1.1,
+        fontsize=8.0,
+    )
+    legend.get_frame().set_linewidth(0.6)
+    legend.get_frame().set_boxstyle('round', pad=0.25, rounding_size=0.6)
     return fig
 
 
@@ -931,184 +1068,237 @@ def save_dipole_outputs(
     variants: Sequence[SVDVariantResult],
     stack: TopographyStack,
     outdir: Path,
-    trans_path: str | Path,
     component_count: int,
     music_threshold: float,
-    color: str,
     dpi: int,
     n_jobs: int,
+    *,
+    subjects: Sequence[int],
+    session: int,
+    story_id: int,
+    bids_root: str | Path,
+    geometry_cache_dir: str | Path,
 ) -> None:
     import matplotlib.pyplot as plt
     import pandas as pd
+    from mne.transforms import Transform
 
-    fwd, trans, subject, subjects_dir = build_fsaverage_forward(
-        info=stack.info,
-        trans_path=trans_path,
+    if not subjects:
+        raise ValueError('At least one subject is required for dipole localisation.')
+    anatomy, participant_models = build_participant_fsaverage_forwards(
+        template_info=stack.info,
+        scaler_ch_names=list(stack.info['ch_names']),
+        subjects=subjects,
+        session=session,
+        story_id=story_id,
+        bids_root=bids_root,
         n_jobs=n_jobs,
+        geometry_cache_dir=geometry_cache_dir,
     )
+    identity_trans = Transform('head', 'mri', np.eye(4))
     rows = []
     diagnostic_rows = []
+    qc_rows = [model[3] for model in participant_models.values()]
     for variant in variants:
-        fit_res = fit_svd_pattern_dipoles(
-            variant=variant,
-            info=stack.info,
-            fwd=fwd,
-            component_count=component_count,
-            music_threshold=music_threshold,
-        )
-        n_source_sites = int(fit_res['n_source_sites'])
-        initial_invalid_indices = np.asarray(
-            fit_res['initial_invalid_site_indices'],
-            dtype=int,
-        )
-        initial_invalid_norms = np.asarray(
-            fit_res['initial_invalid_tangential_norms'],
-            dtype=np.float64,
-        )
-        union_invalid_indices = np.asarray(
-            fit_res['union_invalid_site_indices'],
-            dtype=int,
-        )
-        iteration_invalid_counts = np.asarray(
-            fit_res['iteration_invalid_counts'],
-            dtype=int,
-        )
-        iteration_valid_counts = np.asarray(
-            fit_res['iteration_valid_counts'],
-            dtype=int,
-        )
-        initial_invalid_count = int(initial_invalid_indices.size)
-        union_invalid_count = int(union_invalid_indices.size)
-        max_iteration_invalid_count = (
-            int(np.max(iteration_invalid_counts))
-            if iteration_invalid_counts.size
-            else 0
-        )
-        min_iteration_valid_count = (
-            int(np.min(iteration_valid_counts)) if iteration_valid_counts.size else 0
-        )
-        initial_invalid_fraction = (
-            initial_invalid_count / n_source_sites if n_source_sites else math.nan
-        )
-        union_invalid_fraction = (
-            union_invalid_count / n_source_sites if n_source_sites else math.nan
-        )
-        max_iteration_invalid_fraction = (
-            max_iteration_invalid_count / n_source_sites
-            if n_source_sites
-            else math.nan
-        )
-        diagnostic_rows.append(
-            {
-                'svd_variant': variant.key,
-                'topography_type': 'spatial_pattern',
-                'n_source_sites': n_source_sites,
-                'initial_invalid_source_count': initial_invalid_count,
-                'initial_invalid_source_fraction': initial_invalid_fraction,
-                'initial_invalid_source_percent': initial_invalid_fraction * 100.0,
-                'union_invalid_source_count': union_invalid_count,
-                'union_invalid_source_fraction': union_invalid_fraction,
-                'union_invalid_source_percent': union_invalid_fraction * 100.0,
-                'max_iteration_invalid_source_count': max_iteration_invalid_count,
-                'max_iteration_invalid_source_fraction': (
-                    max_iteration_invalid_fraction
-                ),
-                'max_iteration_invalid_source_percent': (
-                    max_iteration_invalid_fraction * 100.0
-                ),
-                'min_iteration_valid_source_count': min_iteration_valid_count,
-                'rap_music_iteration_count': int(iteration_invalid_counts.size),
-                'component_count': int(fit_res['n_components'][0]),
-                'music_threshold': float(music_threshold),
-                'rap_music_subspace': 'full_selected_topography_components',
-            }
-        )
-        print(
-            'RAP-MUSIC '
-            f'{variant.key}: excluded {initial_invalid_count}/{n_source_sites} '
-            'initial near-zero tangential-gain source sites '
-            f'({initial_invalid_fraction:.2%}); union across deflation iterations '
-            f'{union_invalid_count}/{n_source_sites} ({union_invalid_fraction:.2%}); '
-            'max in one iteration '
-            f'{max_iteration_invalid_count}/{n_source_sites} '
-            f'({max_iteration_invalid_fraction:.2%}).'
-        )
-        fig = plot_dipoles_2d(
-            fit_res=fit_res,
-            trans=trans,
-            subject=subject,
-            subjects_dir=subjects_dir,
-            color=color,
-        )
-        dipole_stem = f'dipoles_{variant.key}_k{int(fit_res["n_components"][0])}'
-        for ext in ('pdf', 'png'):
-            fig.savefig(
-                outdir / f'{dipole_stem}.{ext}',
-                dpi=dpi,
-                bbox_inches='tight',
+        pooled_coords = []
+        pooled_values = []
+        pooled_indices = []
+        pooled_participants = []
+        pooled_hemispheres = []
+        n_components = None
+        for subject in subjects:
+            info, trans, fwd, _qc = participant_models[int(subject)]
+            fit_res = fit_svd_pattern_dipoles(
+                variant=variant,
+                info=info,
+                fwd=fwd,
+                component_count=component_count,
+                music_threshold=music_threshold,
             )
-        plt.close(fig)
-
-        coords = np.vstack(fit_res['coords'])
-        values = np.hstack(fit_res['vals'])
-        indices = np.asarray(fit_res['index'][0], dtype=int)
-        for dipole_idx, (coord, value, source_index) in enumerate(
-            zip(coords, values, indices, strict=True),
-            start=1,
-        ):
-            rows.append(
+            n_components = int(fit_res['n_components'][0])
+            n_source_sites = int(fit_res['n_source_sites'])
+            initial_invalid_indices = np.asarray(
+                fit_res['initial_invalid_site_indices'],
+                dtype=int,
+            )
+            union_invalid_indices = np.asarray(
+                fit_res['union_invalid_site_indices'],
+                dtype=int,
+            )
+            iteration_invalid_counts = np.asarray(
+                fit_res['iteration_invalid_counts'],
+                dtype=int,
+            )
+            iteration_valid_counts = np.asarray(
+                fit_res['iteration_valid_counts'],
+                dtype=int,
+            )
+            initial_invalid_count = int(initial_invalid_indices.size)
+            union_invalid_count = int(union_invalid_indices.size)
+            max_iteration_invalid_count = (
+                int(np.max(iteration_invalid_counts))
+                if iteration_invalid_counts.size
+                else 0
+            )
+            min_iteration_valid_count = (
+                int(np.min(iteration_valid_counts))
+                if iteration_valid_counts.size
+                else 0
+            )
+            initial_invalid_fraction = (
+                initial_invalid_count / n_source_sites if n_source_sites else math.nan
+            )
+            union_invalid_fraction = (
+                union_invalid_count / n_source_sites if n_source_sites else math.nan
+            )
+            max_iteration_invalid_fraction = (
+                max_iteration_invalid_count / n_source_sites
+                if n_source_sites
+                else math.nan
+            )
+            indices = np.asarray(fit_res['index'][0], dtype=int)
+            values = np.asarray(fit_res['vals'][0], dtype=np.float64)
+            n_dipoles = int(indices.size)
+            diagnostic_rows.append(
                 {
+                    'participant': int(subject),
+                    'session': int(session),
+                    'task': str(story_id),
                     'svd_variant': variant.key,
                     'topography_type': 'spatial_pattern',
-                    'dipole': dipole_idx,
-                    'source_index': int(source_index),
-                    'subspace_correlation': float(value),
-                    'x_m': float(coord[0]),
-                    'y_m': float(coord[1]),
-                    'z_m': float(coord[2]),
-                    'component_count': int(fit_res['n_components'][0]),
-                    'music_threshold': float(music_threshold),
-                    'rap_music_subspace': 'full_selected_topography_components',
                     'n_source_sites': n_source_sites,
                     'initial_invalid_source_count': initial_invalid_count,
                     'initial_invalid_source_fraction': initial_invalid_fraction,
+                    'initial_invalid_source_percent': initial_invalid_fraction * 100.0,
                     'union_invalid_source_count': union_invalid_count,
                     'union_invalid_source_fraction': union_invalid_fraction,
-                    'trans': trans,
-                    'subject': subject,
-                    'subjects_dir': subjects_dir,
+                    'union_invalid_source_percent': union_invalid_fraction * 100.0,
+                    'max_iteration_invalid_source_count': max_iteration_invalid_count,
+                    'max_iteration_invalid_source_fraction': (
+                        max_iteration_invalid_fraction
+                    ),
+                    'max_iteration_invalid_source_percent': (
+                        max_iteration_invalid_fraction * 100.0
+                    ),
+                    'min_iteration_valid_source_count': min_iteration_valid_count,
+                    'rap_music_iteration_count': int(iteration_invalid_counts.size),
+                    'component_count': n_components,
+                    'music_threshold': float(music_threshold),
+                    'rap_music_subspace': 'full_selected_topography_components',
                 }
             )
+            print(
+                'RAP-MUSIC '
+                f'{variant.key} sub-{int(subject):02d}: excluded '
+                f'{initial_invalid_count}/{n_source_sites} '
+                'initial near-zero tangential-gain source sites '
+                f'({initial_invalid_fraction:.2%}); '
+                f'n_dipoles={n_dipoles}.'
+            )
+            if n_dipoles == 0:
+                warnings.warn(
+                    f'No RAP-MUSIC dipoles found for subject {int(subject)} '
+                    f'and SVD variant {variant.key!r} with music threshold '
+                    f'{music_threshold}.',
+                    UserWarning,
+                    stacklevel=2,
+                )
+                continue
+            coords = fsaverage_coords_from_head(fwd, indices, trans)
+            for dipole_idx, (coord, value, source_index) in enumerate(
+                zip(coords, values, indices, strict=True),
+                start=1,
+            ):
+                hemisphere = source_index_hemisphere(fwd, int(source_index))
+                rows.append(
+                    {
+                        'participant': int(subject),
+                        'session': int(session),
+                        'task': str(story_id),
+                        'svd_variant': variant.key,
+                        'topography_type': 'spatial_pattern',
+                        'dipole': dipole_idx,
+                        'source_index': int(source_index),
+                        'hemisphere': hemisphere,
+                        'subspace_correlation': float(value),
+                        'x_m': float(coord[0]),
+                        'y_m': float(coord[1]),
+                        'z_m': float(coord[2]),
+                        'coordinate_frame': 'fsaverage',
+                        'component_count': n_components,
+                        'music_threshold': float(music_threshold),
+                        'rap_music_subspace': 'full_selected_topography_components',
+                        'n_source_sites': n_source_sites,
+                        'initial_invalid_source_count': initial_invalid_count,
+                        'initial_invalid_source_fraction': initial_invalid_fraction,
+                        'union_invalid_source_count': union_invalid_count,
+                        'union_invalid_source_fraction': union_invalid_fraction,
+                    }
+                )
+                pooled_coords.append(coord)
+                pooled_values.append(float(value))
+                pooled_indices.append(int(source_index))
+                pooled_participants.append(int(subject))
+                pooled_hemispheres.append(hemisphere)
 
+        n_participants_with_dipoles = len(set(pooled_participants))
+        print(
+            f'RAP-MUSIC {variant.key}: '
+            f'{n_participants_with_dipoles}/{len(subjects)} participants '
+            'contributed dipoles.'
+        )
+        dipole_stem = f'dipoles_{variant.key}_k{int(n_components)}'
+        if not pooled_coords:
+            warnings.warn(
+                f'No RAP-MUSIC dipoles found for SVD variant {variant.key!r}; '
+                'skipping pooled dipole plot.',
+                UserWarning,
+                stacklevel=2,
+            )
+            pooled_coords_m = np.empty((0, 3), dtype=np.float64)
+        else:
+            pooled_coords_m = np.vstack(pooled_coords)
+            plot_fit = {
+                'coords': [np.atleast_2d(pooled_coords_m)],
+                'vals': [pooled_values],
+                'index': [pooled_indices],
+                'n_components': [n_components],
+            }
+            fig = plot_dipoles_2d(
+                fit_res=plot_fit,
+                trans=identity_trans,
+                subject=anatomy.subject,
+                subjects_dir=anatomy.subjects_dir,
+            )
+            for ext in ('pdf', 'png'):
+                fig.savefig(
+                    outdir / f'{dipole_stem}.{ext}',
+                    dpi=dpi,
+                    bbox_inches='tight',
+                )
+            plt.close(fig)
         np.savez_compressed(
             outdir / f'{dipole_stem}.npz',
-            coords_m=coords,
-            subspace_correlations=values,
-            source_indices=indices,
-            component_count=np.asarray(fit_res['n_components'][0], dtype=int),
+            coords_m=pooled_coords_m,
+            subspace_correlations=np.asarray(pooled_values, dtype=np.float64),
+            source_indices=np.asarray(pooled_indices, dtype=int),
+            participants=np.asarray(pooled_participants, dtype=int),
+            hemispheres=np.asarray(pooled_hemispheres),
+            component_count=np.asarray(n_components, dtype=int),
             music_threshold=np.asarray(music_threshold, dtype=np.float64),
             rap_music_subspace=np.asarray('full_selected_topography_components'),
-            n_source_sites=np.asarray(n_source_sites, dtype=int),
-            initial_invalid_source_indices=initial_invalid_indices,
-            initial_invalid_tangential_norms=initial_invalid_norms,
-            union_invalid_source_indices=union_invalid_indices,
-            iteration_invalid_source_counts=iteration_invalid_counts,
-            iteration_valid_source_counts=iteration_valid_counts,
             svd_variant=np.asarray(variant.key),
             topography_type=np.asarray('spatial_pattern'),
-            trans=np.asarray(trans),
-            subject=np.asarray(subject),
-            subjects_dir=np.asarray(subjects_dir),
+            coordinate_frame=np.asarray('fsaverage'),
+            session=np.asarray(session, dtype=int),
+            task=np.asarray(str(story_id)),
+            subject=np.asarray(anatomy.subject),
+            subjects_dir=np.asarray(anatomy.subjects_dir),
         )
 
-    pd.DataFrame(rows).to_csv(
-        outdir / 'dipoles.csv',
-        index=False,
-    )
-    pd.DataFrame(diagnostic_rows).to_csv(
-        outdir / 'dipole_diagnostics.csv',
-        index=False,
-    )
+    pd.DataFrame(rows).to_csv(outdir / 'dipoles.csv', index=False)
+    pd.DataFrame(diagnostic_rows).to_csv(outdir / 'dipole_diagnostics.csv', index=False)
+    pd.DataFrame(qc_rows).to_csv(outdir / 'coregistration_qc.csv', index=False)
 
 
 def save_svd_outputs(
@@ -1123,6 +1313,7 @@ def save_svd_outputs(
     story_id: int,
     dpi: int,
     demean_temporal_filters_enabled: bool,
+    roughness_qc: dict[str, object],
     n_display: int = 10,
 ) -> None:
     import matplotlib.pyplot as plt
@@ -1222,6 +1413,32 @@ def save_svd_outputs(
         'session': np.asarray(ses, dtype=int),
         'story_id': np.asarray(story_id, dtype=int),
         'n_branches': np.asarray(stack.n_branches, dtype=int),
+        'n_items': np.asarray(roughness_qc['n_items'], dtype=int),
+        'n_dropped_items': np.asarray(roughness_qc['n_dropped_items'], dtype=int),
+        'n_rough_items': np.asarray(roughness_qc['n_rough_items'], dtype=int),
+        'n_excluded_items': np.asarray(roughness_qc['n_excluded_items'], dtype=int),
+        'n_retained_items': np.asarray(roughness_qc['n_retained_items'], dtype=int),
+        'spatial_roughness_threshold': np.asarray(
+            roughness_qc['spatial_roughness_threshold'],
+            dtype=np.float64,
+        ),
+        'exclude_rough': np.asarray(roughness_qc['exclude_rough'], dtype=bool),
+        'n_subjects_before_roughness_qc': np.asarray(
+            roughness_qc['n_subjects_before'],
+            dtype=int,
+        ),
+        'n_subjects_after_roughness_qc': np.asarray(
+            roughness_qc['n_subjects_after'],
+            dtype=int,
+        ),
+        'min_retained_branches_per_participant': np.asarray(
+            roughness_qc['min_retained_branches_per_participant'],
+            dtype=int,
+        ),
+        'max_retained_branches_per_participant': np.asarray(
+            roughness_qc['max_retained_branches_per_participant'],
+            dtype=int,
+        ),
     }
     for variant in variants:
         arrays[f'{variant.key}_spatial_filters'] = variant.spatial_filters
@@ -1307,12 +1524,22 @@ def parse_arguments() -> argparse.Namespace:
         help='Cumulative explained-energy threshold for selecting right singular vectors.',
     )
     parser.add_argument(
+        '--svd-normalization',
+        type=str,
+        default='both',
+        choices=SVD_NORMALIZATIONS,
+        help=(
+            'Which SVD variants to compute: unnormalized topographies (raw), '
+            'row-L2-normalized topographies (row_l2), or both. Default: both.'
+        ),
+    )
+    parser.add_argument(
         '--demean-temporal-filters',
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help=(
             'Subtract each learned temporal filter mean before spatial-pattern '
-            'covariance and all SVD/dipole outputs. Default: enabled.'
+            'covariance and all SVD/dipole outputs. Default: disabled.'
         ),
     )
     parser.add_argument(
@@ -1332,19 +1559,7 @@ def parse_arguments() -> argparse.Namespace:
         '--preprocessed-meg-path',
         type=str,
         default=None,
-        help='Path to preprocessed MEG NPZ. Used unless --raw-meg is enabled.',
-    )
-    parser.add_argument(
-        '--raw-meg',
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help='Load raw MEG and preprocess on the fly instead of using a preprocessed NPZ.',
-    )
-    parser.add_argument(
-        '--preprocess',
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help='Apply preprocessing when --raw-meg is enabled.',
+        help='Path to preprocessed MEG NPZ.',
     )
     parser.add_argument(
         '--dpi',
@@ -1357,15 +1572,21 @@ def parse_arguments() -> argparse.Namespace:
         action=argparse.BooleanOptionalAction,
         default=True,
         help=(
-            'Fit and plot RAP-MUSIC dipoles for raw and row-L2-normalized '
-            'spatial-pattern SVD components.'
+            'Fit and plot RAP-MUSIC dipoles for the selected spatial-pattern '
+            'SVD variants.'
         ),
     )
     parser.add_argument(
-        '--dipole-trans',
+        '--raw-bids-root',
         type=str,
-        default=str(Path(PREPROCESSED_DATA_DIR) / 'coords' / 'trans-meg_new.fif'),
-        help='MRI-to-head transform used for fsaverage dipole localization.',
+        default=str(Path(DATA_ROOT) / 'MASC-MEG'),
+        help='Canonical raw/BIDS root used for participant ELP/HSP/MRK geometry.',
+    )
+    parser.add_argument(
+        '--geometry-cache-dir',
+        type=str,
+        default=str(Path(OUTPUTS_DIR) / 'source_geometry'),
+        help='Directory for cached participant head to fsaverage transforms.',
     )
     parser.add_argument(
         '--dipole-components',
@@ -1376,14 +1597,8 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         '--dipole-thr-music',
         type=float,
-        default=0.8,
+        default=0.98,
         help='Minimum RAP-MUSIC subspace correlation for accepting a dipole.',
-    )
-    parser.add_argument(
-        '--dipole-color',
-        type=str,
-        default='crimson',
-        help='Dipole marker color.',
     )
     parser.add_argument(
         '--dipole-n-jobs',
@@ -1398,6 +1613,7 @@ def main_cli() -> None:
     args = parse_arguments()
     validate_run_group(args.run_group)
     validate_energy_threshold(args.energy_threshold)
+    validate_svd_normalization(args.svd_normalization)
     validate_positive_int('dipole_components', args.dipole_components)
     validate_energy_threshold(args.dipole_thr_music)
     validate_positive_int('dipole_n_jobs', args.dipole_n_jobs)
@@ -1410,7 +1626,7 @@ def main_cli() -> None:
         run_group=args.run_group,
     )
 
-    if args.preprocessed_meg_path is None and not args.raw_meg:
+    if args.preprocessed_meg_path is None:
         args.preprocessed_meg_path = (
             Path(PREPROCESSED_DATA_DIR)
             / 'meg'
@@ -1426,10 +1642,34 @@ def main_cli() -> None:
         offset_gap=args.offset_gap,
         meg_format=args.meg_format,
         data_root=args.meg_files_dir,
-        raw_meg=args.raw_meg,
         preprocessed_meg_path=args.preprocessed_meg_path,
-        preprocess=args.preprocess,
         demean_temporal_filters_enabled=args.demean_temporal_filters,
+    )
+    stack, roughness_qc = exclude_rough_spatial_items(
+        stack,
+        dirprocess=hyper_params['dirprocess'],
+    )
+    print(
+        'Spatial-roughness QC from '
+        'lisa.plots.branch_interpretation.compute_item_spatial_roughness '
+        f'(threshold={roughness_qc["spatial_roughness_threshold"]}, '
+        'exclude if roughness > threshold) in '
+        'lisa.plots.plot_spatial_topography_svd: '
+        f'n_items={roughness_qc["n_items"]} '
+        f'n_dropped_items={roughness_qc["n_dropped_items"]} '
+        f'n_retained_items={roughness_qc["n_retained_items"]} '
+        f'n_subjects={roughness_qc["n_subjects_before"]}->'
+        f'{roughness_qc["n_subjects_after"]} '
+        f'retained_branches_per_participant='
+        f'{roughness_qc["min_retained_branches_per_participant"]}..'
+        f'{roughness_qc["max_retained_branches_per_participant"]}; '
+        'same retain mask applied to spatial_filters, spatial_patterns, '
+        'item_subjects, item_branches'
+        + (
+            ', and demeaned_temporal_spatial_patterns'
+            if stack.demeaned_temporal_spatial_patterns is not None
+            else ''
+        )
     )
 
     run_name = str(hyper_params['run_name'])
@@ -1448,6 +1688,7 @@ def main_cli() -> None:
     variants = compute_svd_variants(
         stack=stack,
         energy_threshold=args.energy_threshold,
+        normalization=args.svd_normalization,
     )
     save_svd_outputs(
         variants=variants,
@@ -1461,21 +1702,26 @@ def main_cli() -> None:
         story_id=args.story_id,
         dpi=args.dpi,
         demean_temporal_filters_enabled=args.demean_temporal_filters,
+        roughness_qc=roughness_qc,
     )
     if args.dipoles:
         save_dipole_outputs(
             variants=variants,
             stack=stack,
             outdir=outdir,
-            trans_path=args.dipole_trans,
             component_count=args.dipole_components,
             music_threshold=args.dipole_thr_music,
-            color=args.dipole_color,
             dpi=args.dpi,
             n_jobs=args.dipole_n_jobs,
+            subjects=args.subjects,
+            session=args.session,
+            story_id=args.story_id,
+            bids_root=args.raw_bids_root,
+            geometry_cache_dir=args.geometry_cache_dir,
         )
 
-    print(f'Saved paired raw and row-L2 SVD outputs to {outdir}')
+    variant_keys = ', '.join(variant.key for variant in variants)
+    print(f'Saved SVD outputs ({variant_keys}) to {outdir}')
 
 
 if __name__ == '__main__':

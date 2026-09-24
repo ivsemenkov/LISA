@@ -124,13 +124,22 @@ equivalent to a successful check of the corresponding functionality.
 |---|---|
 | `test_training_criteria.py` | Retrieval loss and metrics, candidate-ID handling, and fail-fast candidate-bank checks. |
 | `test_trainer_outputs.py` | Tensor-to-NumPy ownership and per-window final-test output serialization. |
-| `test_training_cli.py` | Removed CLI options, argument validation, semantic values, and paper-baseline defaults. |
+| `test_training_cli.py` | Argument validation, semantic values, and paper-baseline defaults. |
 | `test_training_data_validation.py` | Validation splitting and fail-fast audio-index checks. |
 | `test_lisa_variations.py` | Model construction, forward passes, output shapes, interpretable/tail APIs, spatial and temporal filter extraction, and representative architecture combinations. |
 | `test_audio_reduction.py` | Feature- and time-axis reduction parsing, PCA artifacts, audio-side reducers, invalid combinations, output-length checks, and determinism normalization for adaptive pooling. |
 | `test_export_parameter_counts.py` | Run-family classification, parameter partitioning across model components, and stable architecture identifiers. |
+| `test_meg_io.py` | MEG preprocessing scaler state, checksums, and inversion back to physical units. |
+| `test_kit_geometry.py` | Participant BIDS digitization, coregistration, and forward-model geometry. |
+| `test_branch_interpretation.py` | Physical-unit spatial and temporal patterns, source geometry, and scaling checks. |
 | `test_cluster_branch_interpretations.py` | Combined branch-clustering validation, minimum-similarity enforcement, rough-pattern handling, and deterministic cluster ordering. |
 | `test_plot_spatial_topography_svd.py` | SVD variants, temporal-filter demeaning, channel alignment, source-index bookkeeping, and expected publication-figure panels. |
+| `test_analyze_interpretation_reproducibility.py` | Story, session, and cross-seed interpretation comparisons, including source-space correspondence. |
+| `test_occlusion_feature_analysis.py` | Paired occlusion ranks, donor matching, and two-sided sign-flip inference. |
+| `test_plot_occlusion_seed_robustness.py` | Cross-seed occlusion result loading, feature splits, and plot outputs. |
+| `test_retrieval_ablation_artifacts.py` | Ablation and reduction run loading, seed templates, and paired summaries. |
+| `test_plot_metrics.py` | Retrieval-curve loading and validation-metric selection. |
+| `test_plot_config_validation.py` | Config keys that may differ when comparing runs for plotting. |
 | `test_plot_style.py` | Figure sizing, readable grid geometry, validation of overly dense layouts, and isolation of Matplotlib style changes. |
 | `test_precompute_word_features.py` | Boundary handling for word-level language-model surprisal and entropy computation using a toy tokenizer and model. |
 

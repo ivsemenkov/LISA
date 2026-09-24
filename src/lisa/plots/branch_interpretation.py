@@ -13,6 +13,12 @@ from sklearn.cluster import AgglomerativeClustering
 from sklearn.covariance import LedoitWolf
 from tqdm import tqdm
 
+from lisa.data.meg_io import (
+    composed_scaling,
+    invert_meg_scaling,
+    read_scaler_states,
+    scaler_state_for,
+)
 from lisa.plots.temporal_filter_utils import demean_temporal_filters, filter_data
 from lisa.utils.constants import PREPROCESSED_DATA_DIR
 from lisa.utils.numeric import EPS, assert_finite as _assert_finite, fft_magnitude
@@ -40,15 +46,96 @@ def load_fixed_meg_batch(
     ses: int,
     story_id: int,
     offset_gap_sec: float = DEFAULT_OFFSET_GAP_SEC,
-) -> np.ndarray:
-    """Load a fixed MEG segment (channels, time) for one subject."""
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, dict[str, Any]]:
+    """Load saved MEG, invert to physical units, then trim onset/offset padding.
+
+    The complete saved float32 recording is validated against the scaler
+    sidecar before any trim or dtype conversion so the checksum covers the
+    whole file.
+    """
+    key = f'subject{sub:02d}_session{ses}_story{story_id}'
+    with np.load(preprocessed_meg_path, allow_pickle=False) as archive:
+        meg_z = np.array(archive[key], copy=True)
+    scalers_path = Path(preprocessed_meg_path).with_name(
+        f'{Path(preprocessed_meg_path).stem}_scalers.npz'
+    )
+    state = scaler_state_for(read_scaler_states(str(scalers_path)), key, meg_z)
+    scale, offset = composed_scaling(state)
+    scale = np.asarray(scale, dtype=np.float64)
+    offset = np.asarray(offset, dtype=np.float64)
+    assert_valid_composed_scaling(
+        scale,
+        offset,
+        n_channels=meg_z.shape[0],
+        scaler_target_fs=float(state['target_fs']),
+        requested_target_fs=target_fs,
+    )
+    meg = invert_meg_scaling(meg_z, state)
     offset_gap = int(offset_gap_sec * target_fs)
-    meg = np.load(preprocessed_meg_path)[
-        f'subject{sub:02d}_session{ses}_story{story_id}'
-    ]
-    meg = meg[:, offset_gap:-offset_gap].astype(np.float64)
+    meg = np.asarray(meg[:, offset_gap:-offset_gap], dtype=np.float64)
     _assert_finite('meg_batch', meg)
-    return meg
+    return meg, scale, offset, state
+
+
+def assert_valid_composed_scaling(
+    scale: np.ndarray,
+    offset: np.ndarray,
+    *,
+    n_channels: int,
+    scaler_target_fs: float,
+    requested_target_fs: float,
+) -> None:
+    """Reject scaler affine parameters that cannot be inverted safely."""
+    if not np.isfinite(scaler_target_fs) or abs(
+        float(scaler_target_fs) - float(requested_target_fs)
+    ) > 1e-9:
+        raise ValueError(
+            f'Scaler target_fs={scaler_target_fs} does not match requested '
+            f'MEG sampling rate {requested_target_fs}.'
+        )
+    if scale.shape != (n_channels,):
+        raise ValueError(
+            f'scale must have shape ({n_channels},), got {scale.shape}.'
+        )
+    if offset.shape != (n_channels,):
+        raise ValueError(
+            f'offset must have shape ({n_channels},), got {offset.shape}.'
+        )
+    if not np.all(np.isfinite(scale)) or not np.all(np.isfinite(offset)):
+        raise ValueError('scale and offset values must be finite.')
+    if np.any(scale <= 0):
+        raise ValueError('scale values must be strictly positive.')
+
+
+def physical_spatial_affine(
+    spatial_weight_z: np.ndarray,
+    spatial_bias_z: np.ndarray | None,
+    scale: np.ndarray,
+    offset: np.ndarray,
+    sub: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Map one recording's composed spatial filters into physical units.
+
+    ``W_phys = W_z / s`` and ``b_phys = b_z - W_phys @ o``. If ``b_z`` is
+    absent, ``b_phys = -W_phys @ o``. Temporal filters are left unchanged.
+    """
+    scale = np.asarray(scale, dtype=np.float64)
+    offset = np.asarray(offset, dtype=np.float64)
+    weight_phys = np.array(spatial_weight_z, dtype=np.float64, copy=True)
+    subject_idx = sub - 1
+    weight_phys[subject_idx] = weight_phys[subject_idx] / scale[np.newaxis, :]
+    projected_offset = weight_phys[subject_idx] @ offset
+    if spatial_bias_z is None:
+        bias_phys = np.zeros((*weight_phys.shape[:-1], 1), dtype=np.float64)
+        bias_phys[subject_idx] = -projected_offset.reshape(
+            bias_phys[subject_idx].shape
+        )
+        return weight_phys, bias_phys
+    bias_phys = np.array(spatial_bias_z, dtype=np.float64, copy=True)
+    bias_phys[subject_idx] = bias_phys[subject_idx] - projected_offset.reshape(
+        bias_phys[subject_idx].shape
+    )
+    return weight_phys, bias_phys
 
 
 def load_subject_meg_and_raw(
@@ -59,53 +146,44 @@ def load_subject_meg_and_raw(
     offset_gap: float,
     meg_format: str,
     data_root: str | Path,
-    raw_meg: bool,
     preprocessed_meg_path: str | Path,
-    preprocess: bool,
     *,
     raw_metadata_only: bool = False,
-):
-    """Load analysis MEG and its Raw sensor metadata.
+) -> tuple[np.ndarray, Any, np.ndarray, np.ndarray]:
+    """Load physical-unit analysis MEG and its Raw sensor metadata.
 
-    ``raw_metadata_only`` avoids loading and resampling the Raw recording when
-    preprocessed MEG supplies the analysis data. Source amplitudes depend on
-    sensor geometry, not the Raw sampling frequency.
+    Analysis data always come from the saved preprocessed archive and its
+    scaler sidecar. ``raw_metadata_only`` avoids loading and resampling the Raw
+    recording when only sensor geometry is required.
     """
-    from lisa.data.meg_io import load_meg, load_raw_meg
+    from lisa.data.meg_io import load_raw_meg
 
-    if raw_meg:
-        meg, raw = load_meg(
-            target_fs=target_fs,
-            sub=sub,
-            ses=ses,
-            story_id=story_id,
-            offset_gap=offset_gap,
-            return_raw=True,
-            preprocess=preprocess,
+    meg, scale, offset, state = load_fixed_meg_batch(
+        preprocessed_meg_path=preprocessed_meg_path,
+        target_fs=target_fs,
+        sub=sub,
+        ses=ses,
+        story_id=story_id,
+        offset_gap_sec=offset_gap,
+    )
+    raw, _ = load_raw_meg(
+        meg_format=meg_format,
+        data_root=str(data_root),
+        sub=sub,
+        ses=ses,
+        story_id=story_id,
+        preload=not raw_metadata_only,
+    )
+    if not raw_metadata_only:
+        raw.resample(target_fs, npad='auto')
+    if not np.array_equal(np.asarray(state['ch_names']), np.asarray(raw.ch_names)):
+        raise ValueError(
+            f'Scaler and MNE channel order differ for subject {sub}.'
         )
-    else:
-        meg = load_fixed_meg_batch(
-            preprocessed_meg_path=preprocessed_meg_path,
-            target_fs=target_fs,
-            sub=sub,
-            ses=ses,
-            story_id=story_id,
-            offset_gap_sec=offset_gap,
-        )
-        raw, _ = load_raw_meg(
-            meg_format=meg_format,
-            data_root=str(data_root),
-            sub=sub,
-            ses=ses,
-            story_id=story_id,
-            preload=not raw_metadata_only,
-        )
-        if not raw_metadata_only:
-            raw.resample(target_fs, npad='auto')
 
     meg = np.asarray(meg, dtype=np.float64)
     _assert_finite(f'meg_subject_{sub}', meg)
-    return meg, raw
+    return meg, raw, scale, offset
 
 
 def extract_run_filters(
@@ -154,6 +232,7 @@ def calculate_spatial_patterns(
     sub: int,
     filtfilt: bool,
     *,
+    channel_pad: np.ndarray,
     return_covariances: bool = False,
 ) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Compute spatial patterns by temporally filtering MEG and estimating covariance.
@@ -164,6 +243,9 @@ def calculate_spatial_patterns(
         temporal_filters: Temporal filters (branches, kernel).
         sub: Subject id (1-indexed). Converted to 0-indexed for model indexing.
         filtfilt: Apply zero-phase temporal filtering.
+        channel_pad: Per-channel convolution pad. Physical-unit interpretation
+            passes the scaler offset ``o`` so a normalized zero is padded as
+            ``o_i`` rather than ``0``.
         return_covariances: Also return Ledoit-Wolf covariances
             ``(branches, channels, channels)``.
 
@@ -174,6 +256,12 @@ def calculate_spatial_patterns(
     _assert_finite('meg_before_spatial_patterns', meg)
     _assert_finite('spatial_filters_weight', spatial_filters_weight)
     _assert_finite('temporal_filters', temporal_filters)
+    pads = np.asarray(channel_pad, dtype=np.float64)
+    if pads.shape != (meg.shape[0],):
+        raise ValueError(
+            'channel_pad must have shape (n_channels,), '
+            f'got {pads.shape} for MEG {meg.shape}.'
+        )
 
     patterns = []
     covariances = []
@@ -185,6 +273,7 @@ def calculate_spatial_patterns(
                 data=meg[ch, :],
                 temporal_filter=kernel,
                 filtfilt=filtfilt,
+                pad_value=float(pads[ch]),
             )
         _assert_finite('temporally_filtered_meg', filtered)
         filtered -= filtered.mean(axis=1, keepdims=True)
@@ -337,7 +426,14 @@ def compute_item_spatial_roughness(
         (spatial_patterns[:, :, np.newaxis] - spatial_patterns[:, neighbor_index]) ** 2,
         axis=(1, 2),
     )
-    roughness = local_mse / (np.var(spatial_patterns, axis=1) + EPS)
+    variance = np.var(spatial_patterns, axis=1)
+    bad = np.where(variance == 0.0)[0]
+    if bad.size:
+        raise ValueError(
+            'Cannot compute spatial roughness for zero-variance patterns at item '
+            f'indices: {bad.tolist()}'
+        )
+    roughness = local_mse / variance
     _assert_finite('item_spatial_roughness', roughness)
     return roughness
 
@@ -369,6 +465,7 @@ def save_item_table_npz(
             dtype=np.float64,
         ),
         demean_temporal_filters=np.asarray(bool(items['demean_temporal_filters'])),
+        sensor_units=np.asarray('physical'),
     )
 
 
@@ -384,7 +481,13 @@ def correlation_similarity(
 
     centered = features - features.mean(axis=1, keepdims=True)
     norms = np.linalg.norm(centered, axis=1, keepdims=True)
-    bad_rows = np.where(norms[:, 0] <= EPS)[0]
+    # Pearson is invariant to positive rescaling, so degeneracy must be too.
+    # Reject a row only when its centered L2 energy is lost to float64 rounding
+    # relative to that row's own scale (including all-zero rows, where both
+    # the centered norm and the scale are zero).
+    row_scale = np.linalg.norm(features, axis=1)
+    tol = np.finfo(np.float64).eps * features.shape[1] * row_scale
+    bad_rows = np.where(norms[:, 0] <= tol)[0]
     if bad_rows.size:
         raise ValueError(
             f'{feature_name} contains near-constant rows: {bad_rows[:5].tolist()}'
@@ -409,10 +512,10 @@ def normalize_source_magnitudes(source_data: np.ndarray) -> np.ndarray:
     _assert_finite('source_data', source_data)
     source_magnitudes = np.abs(source_data)
     norms = np.linalg.norm(source_magnitudes, axis=0, keepdims=True)
-    bad = np.where(norms[0] <= EPS)[0]
+    bad = np.where(norms[0] == 0.0)[0]
     if bad.size:
         raise ValueError(
-            f'Near-zero source projection norms for branches: {bad.tolist()}'
+            f'Zero source projection norms for branches: {bad.tolist()}'
         )
     normalized = source_magnitudes / norms
     _assert_finite('normalized_source_magnitudes', normalized)
@@ -650,16 +753,19 @@ def extract_item_table_from_model(
     offset_gap: float,
     meg_format: str,
     data_root: str | Path,
-    raw_meg: bool,
     preprocessed_meg_path: str | Path,
-    preprocess: bool,
     demean_temporal_filters: bool,
+    raw_bids_root: str | Path,
+    geometry_cache_dir: str | Path,
 ) -> tuple[dict[str, Any], int]:
-    """Extract combined-clustering items while reusing invariant source geometry."""
+    """Extract combined-clustering items with participant-specific fsaverage geometry."""
+    from lisa.data.kit_geometry import prepare_participant_fsaverage_forward
     from lisa.plots.source_estimation import get_stc, prepare_source_geometry
 
     if not subjects:
         raise ValueError('At least one subject is required')
+    bids_root = Path(raw_bids_root)
+    cache_dir = Path(geometry_cache_dir)
 
     filters = extract_run_filters(
         model,
@@ -690,11 +796,13 @@ def extract_item_table_from_model(
     temporal_patterns_all = []
     reference_raw = None
     reference_stc = None
+    template_info = None
+    coregistration_qc: list[dict[str, Any]] = []
 
     progress = tqdm(subjects, desc='Extracting subject-branch patterns')
     for sub in progress:
         started = perf_counter()
-        meg, raw = load_subject_meg_and_raw(
+        meg, raw, scale, offset = load_subject_meg_and_raw(
             sub=sub,
             ses=ses,
             story_id=story_id,
@@ -702,49 +810,70 @@ def extract_item_table_from_model(
             offset_gap=offset_gap,
             meg_format=meg_format,
             data_root=data_root,
-            raw_meg=raw_meg,
             preprocessed_meg_path=preprocessed_meg_path,
-            preprocess=preprocess,
-            raw_metadata_only=not raw_meg,
+            raw_metadata_only=True,
         )
         phase_seconds['load'] += perf_counter() - started
         if reference_raw is None:
             reference_raw = raw
+            template_info = raw.info.copy()
         elif raw.ch_names != reference_raw.ch_names:
             raise ValueError(
                 f'Channel mismatch for subject {sub}; all subjects must share the '
                 'same MEG channel order.'
             )
 
+        weight, bias = physical_spatial_affine(
+            spatial_weight, spatial_bias, scale, offset, sub
+        )
+
         started = perf_counter()
         spatial_patterns = calculate_spatial_patterns(
             meg=meg,
-            spatial_filters_weight=spatial_weight,
+            spatial_filters_weight=weight,
             temporal_filters=temporal_filters,
             sub=sub,
             filtfilt=filtfilt,
+            channel_pad=offset,
         )
         phase_seconds['spatial'] += perf_counter() - started
 
         started = perf_counter()
         temporal_patterns = calculate_temporal_patterns(
             meg=meg,
-            spatial_filters_weight=spatial_weight,
+            spatial_filters_weight=weight,
             temporal_filters=temporal_filters,
             sub=sub,
-            spatial_filters_bias=spatial_bias,
+            spatial_filters_bias=bias,
         )
         phase_seconds['temporal'] += perf_counter() - started
         _assert_finite(f'spatial_patterns_subject_{sub}', spatial_patterns)
         _assert_finite(f'temporal_patterns_subject_{sub}', temporal_patterns)
 
         started = perf_counter()
+        participant_info, participant_trans, participant_fwd, qc = (
+            prepare_participant_fsaverage_forward(
+                template_info=template_info,
+                scaler_ch_names=list(raw.ch_names),
+                bids_root=bids_root,
+                subject=sub,
+                session=ses,
+                task=story_id,
+                src=source_geometry.src,
+                bem=source_geometry.bem,
+                subjects_dir=source_geometry.subjects_dir,
+                cache_dir=cache_dir,
+            )
+        )
         stc = get_stc(
-            raw=raw,
-            spatial_patterns=spatial_patterns,
+            spatial_patterns,
+            info=participant_info,
+            trans=participant_trans,
             prepared_geometry=source_geometry,
+            fwd=participant_fwd,
         )
         phase_seconds['source'] += perf_counter() - started
+        coregistration_qc.append(qc)
         if reference_stc is None:
             reference_stc = stc.copy()
         validate_source_space_compatible(
@@ -771,6 +900,7 @@ def extract_item_table_from_model(
         demean_temporal_filters=demean_temporal_filters,
     )
     items['sensor_xy'] = load_sensor_xy(hyper_params['dirprocess'])
+    items['coregistration_qc'] = coregistration_qc
     if reference_raw is None:
         raise ValueError('No subjects were loaded')
     if len(reference_raw.ch_names) != items['spatial_patterns'].shape[1]:

@@ -5,17 +5,38 @@ import numpy as np
 from lisa.utils.numeric import EPS, assert_finite as _assert_finite
 
 
+def _convolve_same(
+    data: np.ndarray,
+    kernel: np.ndarray,
+    pad_value: float = 0.0,
+) -> np.ndarray:
+    data = np.asarray(data, dtype=np.float64)
+    kernel = np.asarray(kernel, dtype=np.float64)
+    if pad_value == 0.0:
+        return np.convolve(data, kernel, mode='same')
+    return (
+        np.convolve(data - pad_value, kernel, mode='same')
+        + pad_value * kernel.sum()
+    )
+
+
 def filter_data(
     data: np.ndarray,
     temporal_filter: np.ndarray,
     filtfilt: bool,
+    pad_value: float = 0.0,
 ) -> np.ndarray:
     """Apply 1D convolution, optionally forward-backward."""
     if data.ndim != 1:
         raise ValueError(f'Expected 1D data, got {data.shape}.')
-    y = np.convolve(data, temporal_filter, mode='same')
+    y = _convolve_same(data, temporal_filter, pad_value)
     if filtfilt:
-        y = np.convolve(np.flip(y, axis=-1), temporal_filter, mode='same')
+        kernel_sum = float(np.asarray(temporal_filter, dtype=np.float64).sum())
+        y = _convolve_same(
+            np.flip(y, axis=-1),
+            temporal_filter,
+            pad_value * kernel_sum,
+        )
         y = np.flip(y, axis=-1)
     return y
 

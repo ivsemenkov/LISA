@@ -1,8 +1,8 @@
 # LISA Architecture
 
 <p align="center">
-  <a href="assets/LISA.png">
-    <img src="assets/LISA.png" alt="LISA architecture" width="1100">
+  <a href="../docs/assets/architecture.png">
+    <img src="../docs/assets/architecture.png" alt="LISA architecture" width="1100">
   </a>
 </p>
 
@@ -105,9 +105,8 @@ contrastive objective.
 
 # 1. Interpretable front-end
 
-The interpretable front-end is implemented by `SpatialModule`. Despite its
-historical name, it contains both the spatial transform and the branch-wise
-temporal filters.
+The interpretable front-end is implemented by `SpatialModule`. It contains
+both the spatial transform and the branch-wise temporal filters.
 
 ## 1.1 Coordinate-parameterized spatial attention
 

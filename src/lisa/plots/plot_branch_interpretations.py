@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import mne
 import numpy as np
 import pandas as pd
+from matplotlib.ticker import MaxNLocator
 from tqdm import tqdm
 
 from lisa.data.meg_io import load_raw_meg
@@ -21,7 +22,7 @@ from lisa.plots.branch_interpretation import (
     validate_curated_assignments,
 )
 from lisa.plots.plot_style import paper_topomap, publication_style
-from lisa.plots.source_estimation import get_stc, render_lh_rh_views
+from lisa.plots.source_estimation import fsaverage_stc_template, render_lh_rh_views
 from lisa.utils.constants import (
     BRANCH_INTERPRETATION_ASSIGNMENTS_DIR,
     CLEAN_DATA_DIR,
@@ -128,8 +129,6 @@ def validate_clustering_metadata(
     session: int,
     story_id: int,
     subjects: list[int],
-    raw_meg: bool,
-    preprocess: bool,
     preprocessed_meg_path: str | Path | None,
     data_root: str | Path,
     meg_format: str,
@@ -145,8 +144,6 @@ def validate_clustering_metadata(
         "session": int(session),
         "story_id": int(story_id),
         "subjects": [int(subject) for subject in subjects],
-        "raw_meg": bool(raw_meg),
-        "preprocess": bool(preprocess),
         "preprocessed_meg_path": (
             str(preprocessed_meg_path) if preprocessed_meg_path is not None else None
         ),
@@ -309,6 +306,19 @@ def load_cached_item_table(
             raise ValueError(
                 f"Cached item stats {item_stats_npz} is missing keys: {sorted(missing)}"
             )
+        if "sensor_units" not in data.files:
+            raise ValueError(
+                f"Cached item stats {item_stats_npz} is missing "
+                "sensor_units. Rerun "
+                "lisa-combined-cluster-branch-interpretations."
+            )
+        sensor_units = str(np.asarray(data["sensor_units"]).item())
+        if sensor_units != "physical":
+            raise ValueError(
+                f"Cached item stats {item_stats_npz} has "
+                f"sensor_units={sensor_units!r}, expected 'physical'. "
+                "Rerun lisa-combined-cluster-branch-interpretations."
+            )
 
         item_subjects = np.asarray(data["item_subjects"], dtype=int)
         item_branches_one_based = np.asarray(data["item_branches"], dtype=int)
@@ -406,7 +416,6 @@ def load_reference_raw_for_geometry(
     sub: int,
     ses: int,
     story_id: int,
-    target_fs: float,
     meg_format: str,
     data_root: str | Path,
 ) -> mne.io.BaseRaw:
@@ -416,8 +425,8 @@ def load_reference_raw_for_geometry(
         sub=sub,
         ses=ses,
         story_id=story_id,
+        preload=False,
     )
-    raw.resample(target_fs, npad="auto")
     return raw
 
 
@@ -435,12 +444,11 @@ def attach_cached_source_geometry(
             f"Cached item table has {subject_idx.size} items for subject "
             f"{first_subject}, expected {n_branches}."
         )
-    subject_idx = subject_idx[np.argsort(items["branches"][subject_idx])]
-    stc = get_stc(
-        raw=reference_raw,
-        spatial_patterns=items["spatial_patterns"][subject_idx],
-    )
-    items["source_geometry_stc"] = stc.copy()
+    if len(reference_raw.ch_names) != items["spatial_patterns"].shape[1]:
+        raise ValueError(
+            "Channel count mismatch between cached spatial patterns and Raw info."
+        )
+    items["source_geometry_stc"] = fsaverage_stc_template(n_times=1)
 
 
 def summarize_clusters(
@@ -561,9 +569,7 @@ def build_analysis_summary(
     offset_gap: float,
     meg_format: str,
     data_root: str | Path,
-    raw_meg: bool,
     preprocessed_meg_path: str | Path,
-    preprocess: bool,
     exclude_rest: bool,
     demean_temporal_filters: bool,
 ) -> dict[str, Any]:
@@ -590,8 +596,6 @@ def build_analysis_summary(
         session=ses,
         story_id=story_id,
         subjects=subjects,
-        raw_meg=raw_meg,
-        preprocess=preprocess,
         preprocessed_meg_path=preprocessed_meg_path,
         data_root=data_root,
         meg_format=meg_format,
@@ -621,7 +625,6 @@ def build_analysis_summary(
         sub=int(subjects[0]),
         ses=ses,
         story_id=story_id,
-        target_fs=target_fs,
         meg_format=meg_format,
         data_root=data_root,
     )
@@ -711,8 +714,15 @@ def plot_cluster_summary_figure(
         for column in range(n_columns):
             axes[row, column] = fig.add_subplot(grid[row, column + 1])
 
-    xticks_time = np.arange(0.0, np.max(time_ms) + 1e-9, 50.0)
-    xticks_time = xticks_time[xticks_time <= np.max(time_ms)]
+    time_min = float(np.min(time_ms))
+    time_max = float(np.max(time_ms))
+    xticks_time = MaxNLocator(nbins=4, steps=[1, 2, 5, 10]).tick_values(
+        time_min,
+        time_max,
+    )
+    xticks_time = xticks_time[
+        (xticks_time >= time_min - 1e-9) & (xticks_time <= time_max + 1e-9)
+    ]
     xticks = np.arange(0.0, np.max(freqs) + 1e-9, 25.0)
     xticks = xticks[xticks <= np.max(freqs)]
 
@@ -1133,19 +1143,7 @@ def parse_arguments() -> argparse.Namespace:
         "--preprocessed-meg-path",
         type=str,
         default=None,
-        help="Path to preprocessed MEG NPZ. Used unless --raw-meg is enabled.",
-    )
-    parser.add_argument(
-        "--raw-meg",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="Load raw MEG and preprocess on the fly instead of using a preprocessed NPZ.",
-    )
-    parser.add_argument(
-        "--preprocess",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Apply preprocessing when --raw-meg is enabled.",
+        help="Path to preprocessed MEG NPZ.",
     )
     parser.add_argument(
         "--exclude-rest",
@@ -1156,10 +1154,10 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--demean-temporal-filters",
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help=(
             "Subtract each learned temporal filter mean before all pattern, covariance, "
-            "source, spectrum, and plotting computations. Default: enabled."
+            "source, spectrum, and plotting computations. Default: disabled."
         ),
     )
     return parser.parse_args()
@@ -1174,7 +1172,7 @@ def main_cli() -> None:
         run_group=args.run_group,
     )
 
-    if args.preprocessed_meg_path is None and not args.raw_meg:
+    if args.preprocessed_meg_path is None:
         args.preprocessed_meg_path = (
             Path(PREPROCESSED_DATA_DIR)
             / "meg"
@@ -1208,9 +1206,7 @@ def main_cli() -> None:
         offset_gap=args.offset_gap,
         meg_format=args.meg_format,
         data_root=args.meg_files_dir,
-        raw_meg=args.raw_meg,
         preprocessed_meg_path=args.preprocessed_meg_path,
-        preprocess=args.preprocess,
         exclude_rest=args.exclude_rest,
         demean_temporal_filters=args.demean_temporal_filters,
     )

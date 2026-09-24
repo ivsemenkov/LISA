@@ -92,7 +92,7 @@ def parse_args() -> argparse.Namespace:
         default=False,
         help=(
             'If enabled, when a destination file exists but has no provenance entry, record it as owned and skip. '
-            'Fast, but unsafe if that existing file is corrupt/partial from a legacy manual download.'
+            'Fast, but unsafe if that existing file is corrupt or only partially downloaded.'
         ),
     )
 

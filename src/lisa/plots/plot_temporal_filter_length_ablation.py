@@ -17,25 +17,36 @@ import pandas as pd
 
 from lisa.plots.plot_style import FULL_WIDTH_IN, publication_style
 from lisa.plots.temporal_filter_utils import demean_temporal_filters
+from lisa.utils.constants import EXPERIMENTS_DIR
 from lisa.utils.numeric import EPS
 
 
 DEFAULT_KERNEL = 15
 N_BRANCHES = 25
-TARGET_SEED = 42
+SEEDS = (42, 43, 44)
+# The spectral and per-subject artifacts describe one trained model each, so
+# they stay on a single seed; widening them is a separate decision.
+SPECTRAL_SEED = 42
 N_FFT = 4096
 TOP1_COLOR = '#4C78A8'
 TOP10_COLOR = '#F58518'
 
 RUN_GROUPS = {
-    1: 'ablate-tfkernel1-2conv-seed42-paper',
-    5: 'tfk5-2conv-seed42-paper',
-    9: 'tfk9-2conv-seed42-paper',
-    15: '2conv-seed42-paper',
-    19: 'tfk19-2conv-seed42-paper',
-    25: 'tfk25-2conv-seed42-paper',
-    29: 'tfk29-2conv-seed42-paper',
-    49: 'tfk49-2conv-seed42-paper',
+    1: 'ablate-tfkernel1-2conv-seed{seed}-paper',
+    5: 'tfk5-2conv-seed{seed}-paper',
+    9: 'tfk9-2conv-seed{seed}-paper',
+    15: '2conv-seed{seed}-paper',
+    19: 'tfk19-2conv-seed{seed}-paper',
+    25: 'tfk25-2conv-seed{seed}-paper',
+    29: 'tfk29-2conv-seed{seed}-paper',
+    49: 'tfk49-2conv-seed{seed}-paper',
+    65: 'tfk65-2conv-seed{seed}-paper',
+    81: 'tfk81-2conv-seed{seed}-paper',
+    101: 'tfk101-2conv-seed{seed}-paper',
+    151: 'tfk151-2conv-seed{seed}-paper',
+    201: 'tfk201-2conv-seed{seed}-paper',
+    251: 'tfk251-2conv-seed{seed}-paper',
+    299: 'tfk299-2conv-seed{seed}-paper',
 }
 
 WINDOW_ID_COLUMNS = [
@@ -52,6 +63,7 @@ WINDOW_ID_COLUMNS = [
 class RunData:
     kernel_size: int
     duration_ms: int
+    seed: int
     run_dir: Path
     selected_epoch: int
     early_stop_epoch: int
@@ -69,7 +81,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         '--experiments-root',
         type=Path,
-        default=Path('outputs/experiments'),
+        default=Path(EXPERIMENTS_DIR),
     )
     parser.add_argument(
         '--out-dir',
@@ -83,6 +95,7 @@ def find_run_dir(
     experiments_root: Path,
     run_group: str,
     kernel_size: int,
+    seed: int,
 ) -> tuple[Path, dict]:
     group_dir = experiments_root / run_group
     if not group_dir.is_dir():
@@ -98,20 +111,21 @@ def find_run_dir(
             config.get('temporal_filter_kernel_size') == kernel_size
             and config.get('n_channels_unmix') == N_BRANCHES
             and config.get('n_channels_block') == N_BRANCHES
+            and config.get('seed') == seed
         ):
             matches.append((run_dir, config))
 
     if len(matches) != 1:
         raise ValueError(
-            f'Expected one {N_BRANCHES}-branch K={kernel_size} run in '
-            f'{group_dir}, found {len(matches)}.'
+            f'Expected one {N_BRANCHES}-branch K={kernel_size} seed-{seed} run '
+            f'in {group_dir}, found {len(matches)}.'
         )
     return matches[0]
 
 
-def validate_config(config: dict, kernel_size: int, run_dir: Path) -> None:
+def validate_config(config: dict, kernel_size: int, seed: int, run_dir: Path) -> None:
     expected = {
-        'seed': TARGET_SEED,
+        'seed': seed,
         'meg_sr': 100,
         'temporal_filter_kernel_size': kernel_size,
         'temporal_filter_type': 'conv',
@@ -132,9 +146,10 @@ def load_run(
     experiments_root: Path,
     kernel_size: int,
     run_group: str,
+    seed: int,
 ) -> RunData:
-    run_dir, config = find_run_dir(experiments_root, run_group, kernel_size)
-    validate_config(config, kernel_size, run_dir)
+    run_dir, config = find_run_dir(experiments_root, run_group, kernel_size, seed)
+    validate_config(config, kernel_size, seed, run_dir)
 
     metrics = pd.read_csv(run_dir / 'metrics.csv')
     selected_rows = metrics[metrics['loss_final_test'].notna()]
@@ -189,6 +204,7 @@ def load_run(
     return RunData(
         kernel_size=kernel_size,
         duration_ms=kernel_size * 10,
+        seed=seed,
         run_dir=run_dir,
         selected_epoch=int(selected['epoch']),
         early_stop_epoch=int(early_stop_rows.iloc[0]['early_stop_epoch']),
@@ -214,13 +230,22 @@ def validate_paired_queries(runs: list[RunData]) -> None:
 
 
 def build_result_table(runs: list[RunData]) -> pd.DataFrame:
-    baseline = next(run for run in runs if run.kernel_size == DEFAULT_KERNEL)
+    # Deltas are paired within seed: every run is compared with the default
+    # kernel trained from the same seed, never with a pooled baseline.
+    baselines = {run.seed: run for run in runs if run.kernel_size == DEFAULT_KERNEL}
+    if set(baselines) != set(SEEDS):
+        raise ValueError(
+            f'Missing K={DEFAULT_KERNEL} runs for seeds '
+            f'{sorted(set(SEEDS) - set(baselines))}.'
+        )
     rows = []
     for run in runs:
+        baseline = baselines[run.seed]
         rows.append(
             {
                 'kernel_size': run.kernel_size,
                 'duration_ms': run.duration_ms,
+                'seed': run.seed,
                 'no_temporal_context': run.kernel_size == 1,
                 'is_default': run.kernel_size == DEFAULT_KERNEL,
                 'top1_percent': run.top1,
@@ -234,7 +259,34 @@ def build_result_table(runs: list[RunData]) -> pd.DataFrame:
                 'run_dir': str(run.run_dir),
             }
         )
-    return pd.DataFrame(rows).sort_values('kernel_size').reset_index(drop=True)
+    return (
+        pd.DataFrame(rows).sort_values(['kernel_size', 'seed']).reset_index(drop=True)
+    )
+
+
+def build_summary_table(table: pd.DataFrame) -> pd.DataFrame:
+    """Collapse the per-seed rows to one row per kernel size."""
+    summary = table.groupby(
+        ['kernel_size', 'duration_ms', 'no_temporal_context', 'is_default'],
+        as_index=False,
+    ).agg(
+        top1_percent_mean=('top1_percent', 'mean'),
+        top1_percent_min=('top1_percent', 'min'),
+        top1_percent_max=('top1_percent', 'max'),
+        top10_percent_mean=('top10_percent', 'mean'),
+        top10_percent_min=('top10_percent', 'min'),
+        top10_percent_max=('top10_percent', 'max'),
+        delta_top1_pp_mean=('delta_top1_pp', 'mean'),
+        delta_top1_pp_min=('delta_top1_pp', 'min'),
+        delta_top1_pp_max=('delta_top1_pp', 'max'),
+        delta_top10_pp_mean=('delta_top10_pp', 'mean'),
+        delta_top10_pp_min=('delta_top10_pp', 'min'),
+        delta_top10_pp_max=('delta_top10_pp', 'max'),
+        n_seeds=('seed', 'nunique'),
+    )
+    if not (summary['n_seeds'] == len(SEEDS)).all():
+        raise ValueError(f'Every kernel size needs {len(SEEDS)} seeds:\n{summary}')
+    return summary.sort_values('kernel_size').reset_index(drop=True)
 
 
 def build_subject_delta_table(runs: list[RunData]) -> pd.DataFrame:
@@ -255,41 +307,56 @@ def build_subject_delta_table(runs: list[RunData]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def write_latex_table(table: pd.DataFrame, path: Path) -> None:
-    best_top1 = float(table['top1_percent'].max())
-    best_top10 = float(table['top10_percent'].max())
+def latex_metric_table(
+    table: pd.DataFrame,
+    summary: pd.DataFrame,
+    *,
+    metric: str,
+    metric_label: str,
+    tex_label: str,
+) -> str:
+    per_seed = table.pivot(
+        index='kernel_size', columns='seed', values=f'{metric}_percent'
+    )
+    mean_column = f'{metric}_percent_mean'
+    delta_column = f'delta_{metric}_pp_mean'
+    best_mean = float(summary[mean_column].max())
+    seed_headers = ' & '.join(rf'Seed {seed} (\%)' for seed in SEEDS)
     lines = [
         r'\begin{table}[t]',
         r'\centering',
         (
-            r'\caption{Effect of temporal-filter support on retrieval accuracy. '
-            r'All models use 25 branches and the same deterministic training seed.}'
+            rf'\caption{{Effect of temporal-filter support on {metric_label} '
+            r'retrieval accuracy, for three training seeds. All models use 25 '
+            r'branches. Deltas are paired within seed, each run against the '
+            r'150-ms run of the same seed.}'
         ),
-        r'\label{tab:temporal-filter-length}',
-        r'\begin{tabular}{rrrrrr}',
+        rf'\label{{{tex_label}}}',
+        r'\begin{tabular}{rr' + 'r' * len(SEEDS) + r'rr}',
         r'\toprule',
         (
-            r'Kernel & Support (ms) & Top-1 (\%) & $\Delta$Top-1 (pp) '
-            r'& Top-10 (\%) & $\Delta$Top-10 (pp) \\'
+            rf'Kernel & Support (ms) & {seed_headers} & Mean (\%) '
+            r'& $\Delta$Mean (pp) \\'
         ),
         r'\midrule',
     ]
-    for row in table.itertuples(index=False):
+    for row in summary.itertuples(index=False):
         kernel = str(row.kernel_size)
         if row.is_default:
             kernel += r' (default)'
         support = str(row.duration_ms)
         if row.no_temporal_context:
             support += r'\textsuperscript{a}'
-        top1 = f'{row.top1_percent:.2f}'
-        top10 = f'{row.top10_percent:.2f}'
-        if np.isclose(row.top1_percent, best_top1):
-            top1 = rf'\textbf{{{top1}}}'
-        if np.isclose(row.top10_percent, best_top10):
-            top10 = rf'\textbf{{{top10}}}'
+        seed_values = ' & '.join(
+            f'{per_seed.loc[row.kernel_size, seed]:.2f}' for seed in SEEDS
+        )
+        mean_value = getattr(row, mean_column)
+        mean_text = f'{mean_value:.2f}'
+        if np.isclose(mean_value, best_mean):
+            mean_text = rf'\textbf{{{mean_text}}}'
         lines.append(
-            f'{kernel} & {support} & {top1} & {row.delta_top1_pp:+.2f} '
-            f'& {top10} & {row.delta_top10_pp:+.2f} \\\\'
+            f'{kernel} & {support} & {seed_values} & {mean_text} '
+            f'& {getattr(row, delta_column):+.2f} \\\\'
         )
     lines.extend(
         [
@@ -298,13 +365,32 @@ def write_latex_table(table: pd.DataFrame, path: Path) -> None:
             (
                 r'\vspace{2pt}\parbox{\linewidth}{\footnotesize '
                 r'\textsuperscript{a}A one-tap filter has no temporal context; '
-                r'it only rescales each branch. Deltas are relative to the '
-                r'150-ms default.}'
+                r'it only rescales each branch.}'
             ),
             r'\end{table}',
         ]
     )
-    path.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+    return '\n'.join(lines)
+
+
+def write_latex_table(table: pd.DataFrame, summary: pd.DataFrame, path: Path) -> None:
+    blocks = [
+        latex_metric_table(
+            table,
+            summary,
+            metric='top1',
+            metric_label='Top-1',
+            tex_label='tab:temporal-filter-length-top1',
+        ),
+        latex_metric_table(
+            table,
+            summary,
+            metric='top10',
+            metric_label='Top-10',
+            tex_label='tab:temporal-filter-length-top10',
+        ),
+    ]
+    path.write_text('\n\n'.join(blocks) + '\n', encoding='utf-8')
 
 
 def save_figure(fig: plt.Figure, out_dir: Path, stem: str) -> None:
@@ -325,16 +411,28 @@ def x_tick_labels(table: pd.DataFrame) -> list[str]:
 
 
 @publication_style
-def plot_performance_delta(table: pd.DataFrame) -> plt.Figure:
+def plot_performance_delta(summary: pd.DataFrame) -> plt.Figure:
+    """Mean change per kernel size, with the seed range shaded behind it."""
     fig, ax = plt.subplots(figsize=(FULL_WIDTH_IN, 3.5))
-    x = table['duration_ms'].to_numpy()
+    x = summary['duration_ms'].to_numpy()
     for metric, label, color, marker in [
         ('delta_top1_pp', 'Top-1', TOP1_COLOR, 'o'),
         ('delta_top10_pp', 'Top-10', TOP10_COLOR, 's'),
     ]:
+        # With three seeds the band edges are the best and worst runs.
+        ax.fill_between(
+            x,
+            summary[f'{metric}_min'],
+            summary[f'{metric}_max'],
+            color=color,
+            alpha=0.18,
+            linewidth=0,
+            label='_nolegend_',
+            zorder=2,
+        )
         ax.plot(
             x,
-            table[metric],
+            summary[f'{metric}_mean'],
             color=color,
             marker=marker,
             markersize=5.5,
@@ -343,14 +441,9 @@ def plot_performance_delta(table: pd.DataFrame) -> plt.Figure:
             zorder=3,
         )
     ax.axhline(0.0, color='0.35', linestyle='--', linewidth=1.0, zorder=1)
-    ax.axvline(
-        DEFAULT_KERNEL * 10,
-        color='0.55',
-        linestyle=':',
-        linewidth=1.0,
-        zorder=1,
-    )
-    ax.set_xticks(x, x_tick_labels(table))
+    ax.set_xscale('log')
+    ax.set_xticks(x, x_tick_labels(summary), rotation=90, ha='center')
+    ax.minorticks_off()
     ax.set_xlabel('Temporal-filter support (ms; 100 Hz)')
     ax.set_ylabel('Change vs 150-ms default (pp)')
     ax.legend(frameon=False, ncol=2, loc='upper left')
@@ -434,7 +527,7 @@ def plot_subject_spread(
     shared_limit = max(1.0, 1.05 * max_abs_delta)
     axes[0].set_ylim(-shared_limit, shared_limit)
 
-    axes[-1].set_xticks(positions, x_tick_labels(table))
+    axes[-1].set_xticks(positions, x_tick_labels(table), rotation=90, ha='center')
     axes[-1].set_xlabel('Temporal-filter support (ms; 100 Hz)')
     return fig
 
@@ -499,7 +592,7 @@ def plot_frequency_medians(
 ) -> plt.Figure:
     spectral_runs = [run for run in runs if run.kernel_size > 1]
     fig, ax = plt.subplots(
-        figsize=(FULL_WIDTH_IN, 3.4),
+        figsize=(FULL_WIDTH_IN, 3.8),
         constrained_layout=True,
     )
     colors = plt.get_cmap('viridis')(np.linspace(0.05, 0.95, len(spectral_runs)))
@@ -524,10 +617,16 @@ def plot_frequency_medians(
     ax.set_ylabel(r'Median normalized amplitude $|H(f)|$')
     ax.legend(
         frameon=False,
-        ncol=2,
+        ncol=3,
         loc='upper right',
     )
     return fig
+
+
+def _heatmap_grid(n_panels: int) -> tuple[int, int]:
+    n_cols = 4
+    n_rows = int(np.ceil(n_panels / n_cols))
+    return n_rows, n_cols
 
 
 @publication_style
@@ -537,17 +636,23 @@ def plot_frequency_heatmaps(
     demean: bool,
 ) -> plt.Figure:
     spectral_runs = [run for run in runs if run.kernel_size > 1]
+    n_rows, n_cols = _heatmap_grid(len(spectral_runs))
     fig, axes = plt.subplots(
-        2,
-        4,
-        figsize=(FULL_WIDTH_IN, 4.7),
+        n_rows,
+        n_cols,
+        figsize=(FULL_WIDTH_IN, 2.35 * n_rows),
         sharex=True,
         sharey=True,
         constrained_layout=True,
     )
+    axes = np.atleast_2d(axes)
     image = None
     flat_axes = axes.ravel()
-    for ax, run in zip(flat_axes, spectral_runs):
+    if len(spectral_runs) > len(flat_axes):
+        raise ValueError(
+            f'Heatmap grid {n_rows}x{n_cols} cannot hold {len(spectral_runs)} runs.'
+        )
+    for ax, run in zip(flat_axes, spectral_runs, strict=False):
         result = normalized_magnitude_spectra(
             run.temporal_filters,
             demean=demean,
@@ -570,13 +675,12 @@ def plot_frequency_heatmaps(
         ax.set_xlim(0.0, 50.0)
         ax.set_xticks(np.arange(0.0, 51.0, 10.0))
         ax.set_yticks([1, 13, 25])
-    for ax in flat_axes[len(spectral_runs) :]:
-        ax.set_axis_off()
-
     for ax in axes[-1, :]:
         ax.set_xlabel('Frequency (Hz)')
     for ax in axes[:, 0]:
         ax.set_ylabel('Branch')
+    for ax in flat_axes[len(spectral_runs) :]:
+        ax.set_axis_off()
     if image is not None:
         colorbar = fig.colorbar(
             image,
@@ -593,23 +697,39 @@ def main() -> None:
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     runs = [
-        load_run(args.experiments_root, kernel_size, run_group)
+        load_run(args.experiments_root, kernel_size, run_group.format(seed=seed), seed)
         for kernel_size, run_group in RUN_GROUPS.items()
+        for seed in SEEDS
     ]
-    runs.sort(key=lambda run: run.kernel_size)
+    runs.sort(key=lambda run: (run.kernel_size, run.seed))
     validate_paired_queries(runs)
-    one_tap_run = next(run for run in runs if run.kernel_size == 1)
-    validate_one_tap_response(one_tap_run)
+    for seed in SEEDS:
+        validate_one_tap_response(
+            next(run for run in runs if run.kernel_size == 1 and run.seed == seed)
+        )
 
     table = build_result_table(runs)
-    subject_deltas = build_subject_delta_table(runs)
+    summary = build_summary_table(table)
+
+    # Per-subject and spectral artifacts describe one model each, so they use a
+    # single seed and keep the meaning they had before.
+    spectral_runs = [run for run in runs if run.seed == SPECTRAL_SEED]
+    spectral_table = table[table['seed'] == SPECTRAL_SEED].reset_index(drop=True)
+    subject_deltas = build_subject_delta_table(spectral_runs)
+
     table.to_csv(
         args.out_dir / 'temporal_filter_ablation_table.csv',
         index=False,
         float_format='%.6f',
     )
+    summary.to_csv(
+        args.out_dir / 'temporal_filter_ablation_summary.csv',
+        index=False,
+        float_format='%.6f',
+    )
     write_latex_table(
         table,
+        summary,
         args.out_dir / 'temporal_filter_ablation_table.txt',
     )
     subject_deltas.to_csv(
@@ -619,32 +739,32 @@ def main() -> None:
     )
 
     save_figure(
-        plot_performance_delta(table),
+        plot_performance_delta(summary),
         args.out_dir,
         'temporal_filter_performance_delta',
     )
     save_figure(
-        plot_subject_spread(table, subject_deltas),
+        plot_subject_spread(spectral_table, subject_deltas),
         args.out_dir,
         'temporal_filter_subject_spread',
     )
     save_figure(
-        plot_frequency_medians(runs, demean=False),
+        plot_frequency_medians(spectral_runs, demean=False),
         args.out_dir,
         'temporal_filter_frequency_medians_raw',
     )
     save_figure(
-        plot_frequency_medians(runs, demean=True),
+        plot_frequency_medians(spectral_runs, demean=True),
         args.out_dir,
         'temporal_filter_frequency_medians_demeaned',
     )
     save_figure(
-        plot_frequency_heatmaps(runs, demean=False),
+        plot_frequency_heatmaps(spectral_runs, demean=False),
         args.out_dir,
         'temporal_filter_frequency_heatmaps_raw',
     )
     save_figure(
-        plot_frequency_heatmaps(runs, demean=True),
+        plot_frequency_heatmaps(spectral_runs, demean=True),
         args.out_dir,
         'temporal_filter_frequency_heatmaps_demeaned',
     )

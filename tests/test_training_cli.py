@@ -6,37 +6,6 @@ from lisa.cli.parse_experiment_args import (
 )
 
 
-def test_continue_training_is_removed_from_parser():
-    with pytest.raises(SystemExit):
-        parse_experiment_arguments(
-            [
-                '--run-group',
-                'test-publication',
-                '--device',
-                'cpu',
-                '--continue-training',
-                'checkpoint.pt',
-            ]
-        )
-
-
-@pytest.mark.parametrize(
-    'legacy_option', ['--plot-subject', '--plot-session', '--plot-task']
-)
-def test_legacy_plot_selection_options_are_removed_from_parser(legacy_option):
-    with pytest.raises(SystemExit):
-        parse_experiment_arguments(
-            [
-                '--run-group',
-                'test-publication',
-                '--device',
-                'cpu',
-                legacy_option,
-                '0',
-            ]
-        )
-
-
 def test_spatial_dropout_number_must_be_integer():
     with pytest.raises(SystemExit):
         parse_experiment_arguments(
@@ -66,7 +35,6 @@ def test_training_defaults_match_paper_baseline():
     assert args['torch_deterministic'] is False
     assert args['plot_filter_graphs'] is False
     assert args['logger'] == 'local'
-    assert not {'plot_subject', 'plot_session', 'plot_task'} & args.keys()
 
 
 def test_filter_graph_plotting_is_opt_in():

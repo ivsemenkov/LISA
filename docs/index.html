@@ -170,7 +170,7 @@
             </div>
             <span class="card-number">02</span>
             <h3>Interpretable branches</h3>
-            <p>Twenty-five subject-specific branches pair spatial filters with 150 ms temporal kernels, matching each branch to a source in space and time.</p>
+            <p>Twenty-five branches form the compact learned representation. Each branch has an explicit spatial filter and temporal response, and its spatial pattern can be mapped into source space.</p>
           </article>
           <article class="method-card">
             <div class="method-icon" aria-hidden="true">
@@ -206,8 +206,8 @@
         <article class="finding-wide finding-sources">
           <div class="finding-copy">
             <p class="finding-index">Finding 01</p>
-            <h3>Learned weights recover a speech-perception network.</h3>
-            <p>Spatial patterns projected to source space identify generators in bilateral auditory cortex, medial temporal regions, and frontal cortex. Left-localized branches carry higher-frequency rhythmic components not evident on the right.</p>
+            <h3>Learned patterns recover bilateral cortical structure.</h3>
+            <p>Candidate source locations are distributed bilaterally over lateral cortex. The densest concentrations are around temporal and adjacent peri-Sylvian regions, with sparser locations elsewhere, and the distributed source maps show that same lateral temporal and peri-Sylvian structure. Longer temporal support resolves secondary components near 8–17 Hz in both hemispheres.</p>
             <ul class="plain-list">
               <li>Spatial filters are converted to activation patterns.</li>
               <li>Temporal kernels reveal branch-specific dynamics.</li>
@@ -217,10 +217,10 @@
           <figure class="paper-figure source-figure">
             <div class="figure-viewport media-frame">
               <a href="assets/cortical-sources.png" aria-label="Open the cortical source figure at full resolution">
-                <img src="assets/cortical-sources.png" loading="lazy" width="2134" height="814" alt="Axial, coronal, and sagittal views showing fitted source dipoles concentrated around bilateral auditory, temporal, and frontal regions.">
+                <img src="assets/cortical-sources.png" loading="lazy" width="1237" height="496" alt="Axial, coronal, and sagittal views of candidate source locations distributed bilaterally over lateral cortex, densest around temporal and peri-Sylvian regions.">
               </a>
             </div>
-            <figcaption>Dominant dipoles from the leading cross-subject spatial patterns, shown in axial, coronal, and sagittal views.</figcaption>
+            <figcaption>Candidate source locations from the leading cross-subject spatial patterns, shown in axial, coronal, and sagittal views.</figcaption>
           </figure>
         </article>
 
@@ -230,11 +230,11 @@
               <p class="finding-index">Inside the branches</p>
               <h3>Space, time, rhythm, and source remain connected.</h3>
             </div>
-            <p>Each column follows one learned branch cluster from its sensor topography through its temporal response and spectrum to a cortical source estimate.</p>
+            <p>Each column follows one learned branch cluster from its sensor topography through its temporal response and spectrum to left- and right-hemisphere source maps.</p>
           </div>
           <div class="figure-viewport media-frame">
             <a href="assets/interpretable-branches.png" aria-label="Open the complete branch-cluster figure at full resolution">
-              <img src="assets/interpretable-branches.png" loading="lazy" width="3507" height="1890" alt="Six representative learned branch clusters, each shown from sensor topography through temporal pattern and spectrum to cortical source estimates.">
+              <img src="assets/interpretable-branches.png" loading="lazy" width="2105" height="1134" alt="Six representative learned branch clusters, each shown from sensor topography through temporal pattern and spectrum to left- and right-hemisphere source maps.">
             </a>
           </div>
           <figcaption>Six representative clusters from the main 25-branch model. Every column preserves the complete path from sensor space to source space.</figcaption>
@@ -245,15 +245,15 @@
             <p class="finding-index">Finding 02</p>
             <h3>The decoder relies most on acoustic state and transitions.</h3>
             <p>Paired MEG occlusion compares matched replacements drawn from feature-present and feature-absent intervals. Fifteen of nineteen tested features contribute reliably; silence, sound intensity, vowels, and acoustic onsets produce the largest effects.</p>
-            <p class="finding-note"><strong>A revealing reversal:</strong> replacing random-word-list activity with narrative MEG improves retrieval, suggesting that coherent speech evokes more recoverable information.</p>
+            <p class="finding-note"><strong>A revealing reversal:</strong> random word lists are significantly negative. Replacing that activity with narrative MEG improves retrieval.</p>
           </div>
           <figure class="paper-figure feature-figure">
             <div class="figure-viewport media-frame">
               <a href="assets/feature-effects.png" aria-label="Open the stimulus-feature intervention figure at full resolution">
-                <img src="assets/feature-effects.png" loading="lazy" width="2588" height="1609" alt="Participant-level rank differences for nineteen stimulus-feature interventions, with null-distribution violins and significance markers.">
+                <img src="assets/feature-effects.png" loading="lazy" width="2590" height="1611" alt="Participant-level rank differences for nineteen stimulus-feature comparisons, with sign-flip null violins and family-wise significance markers.">
               </a>
             </div>
-            <figcaption>Gray points show participants, diamonds show observed effects, and green violins show the paired null distribution. Positive values mean that feature-absent replacement worsened retrieval more than the matched control. Significance markers reflect one-sided tests for positive effects.</figcaption>
+            <figcaption>Gray points show participants, diamonds show the group effect, and green violins show the sign-flip null. Positive values mean that feature-absent replacement worsened retrieval more than the matched control. Stars mark participant-level two-sided sign-flip tests that remain significant after single-step max-|T| family-wise correction.</figcaption>
           </figure>
         </article>
 
@@ -267,7 +267,7 @@
           <figure class="paper-figure compression-figure">
             <div class="figure-viewport media-frame">
               <a href="assets/feature-compression.png" aria-label="Open the feature-compression figure at full resolution">
-                <img src="assets/feature-compression.png" loading="lazy" width="2843" height="1113" alt="Top-1 and Top-10 accuracy across embedding dimensions. Learned linear reduction remains near full-model accuracy down to roughly twelve dimensions, while PCA degrades earlier.">
+                <img src="assets/feature-compression.png" loading="lazy" width="1705" height="668" alt="Top-1 and Top-10 accuracy across embedding dimensions. Learned linear reduction remains near full-model accuracy down to roughly twelve dimensions, while PCA degrades earlier.">
               </a>
             </div>
             <figcaption>Task-driven feature reduction preserves retrieval in a compact subspace.</figcaption>
@@ -283,7 +283,7 @@
           <figure class="paper-figure duration-figure">
             <div class="figure-viewport media-frame">
               <a href="assets/segment-duration.png" aria-label="Open the segment-duration figure at full resolution">
-                <img src="assets/segment-duration.png" loading="lazy" width="2100" height="1500" alt="Top-1 and Top-10 retrieval accuracy from 1.5 to 5 second MEG segments for decoders with zero, two, and five convolutional blocks.">
+                <img src="assets/segment-duration.png" loading="lazy" width="1260" height="900" alt="Top-1 and Top-10 retrieval accuracy from 1.5 to 5 second MEG segments for decoders with zero, two, and five convolutional blocks.">
               </a>
             </div>
             <figcaption>All durations use the same 991-candidate test set. The monotonic trend holds for decoders with zero, two, and five convolutional blocks.</figcaption>

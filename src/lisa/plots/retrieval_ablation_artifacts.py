@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import argparse
 import json
-from dataclasses import dataclass
+import warnings
+from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any
+from string import Formatter
+from typing import Any, Sequence
 
 import matplotlib
 
@@ -17,6 +19,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 
+from lisa.utils.constants import EXPERIMENTS_DIR
 from lisa.utils.validators import validate_run_group
 
 
@@ -127,7 +130,54 @@ def method_label(raw_method: Any, mapping: dict[str, str]) -> str:
     return mapping.get(raw, raw.replace('_', ' ').title())
 
 
-def parse_key_value_overrides(entries: list[str], arg_name: str) -> dict[str, str]:
+def seed_template_fields(template: str) -> list[str]:
+    """Return placeholder names; only exactly ``{seed}`` is allowed."""
+    try:
+        parsed = list(Formatter().parse(template))
+    except ValueError as exc:
+        raise ValueError(f'Invalid run-group template {template!r}: {exc}') from exc
+    fields = []
+    for _literal, field_name, format_spec, conversion in parsed:
+        if field_name is None:
+            continue
+        if field_name != 'seed' or format_spec or conversion:
+            raise ValueError(
+                f'Run-group template {template!r} may only use the {{seed}} '
+                'placeholder.'
+            )
+        fields.append(field_name)
+    return fields
+
+
+def expand_run_group_template(template: str, seed: int) -> str:
+    seed_template_fields(template)
+    run_group = template.format(seed=seed)
+    validate_run_group(run_group)
+    return run_group
+
+
+def expand_label_overrides(
+    overrides: dict[str, str],
+    seeds: list[int] | None,
+) -> dict[str, str]:
+    if seeds is None:
+        return overrides
+    expanded: dict[str, str] = {}
+    for key, value in overrides.items():
+        if seed_template_fields(key):
+            for seed in seeds:
+                expanded[expand_run_group_template(key, seed)] = value
+        else:
+            expanded[key] = value
+    return expanded
+
+
+def parse_key_value_overrides(
+    entries: list[str],
+    arg_name: str,
+    *,
+    allow_seed_template: bool = False,
+) -> dict[str, str]:
     overrides: dict[str, str] = {}
     for entry in entries:
         if '=' not in entry:
@@ -140,19 +190,27 @@ def parse_key_value_overrides(entries: list[str], arg_name: str) -> dict[str, st
             raise argparse.ArgumentTypeError(
                 f'{arg_name} has an empty run group in {entry!r}.'
             )
-        validate_run_group(run_group)
+        if allow_seed_template:
+            try:
+                fields = seed_template_fields(run_group)
+            except ValueError as exc:
+                raise argparse.ArgumentTypeError(str(exc)) from exc
+            if not fields:
+                validate_run_group(run_group)
+        else:
+            validate_run_group(run_group)
         overrides[run_group] = value.strip()
     return overrides
 
 
-def parse_args() -> argparse.Namespace:
+def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description='Generate ablation/reduction artifacts from completed retrieval runs.'
     )
     parser.add_argument(
         '--experiments-root',
         type=Path,
-        default=Path('outputs/experiments'),
+        default=Path(EXPERIMENTS_DIR),
         help='Root directory with experiment run groups.',
     )
     parser.add_argument(
@@ -228,7 +286,19 @@ def parse_args() -> argparse.Namespace:
         action='store_true',
         help='Allow writing into a non-empty output directory.',
     )
-    args = parser.parse_args()
+    parser.add_argument(
+        '--seeds',
+        nargs='+',
+        type=int,
+        default=None,
+        metavar='SEED',
+        help=(
+            'If given, expand {seed} in run-group templates and pair each '
+            'condition with the same-seed full model. Omitted: current '
+            'single-run lookup.'
+        ),
+    )
+    args = parser.parse_args(argv)
 
     all_run_groups = (
         [args.baseline_run_group]
@@ -237,8 +307,20 @@ def parse_args() -> argparse.Namespace:
         + args.feature_run_groups
         + args.time_run_groups
     )
-    for run_group in all_run_groups:
-        validate_run_group(run_group)
+    if args.seeds is not None:
+        if len(set(args.seeds)) != len(args.seeds):
+            parser.error('--seeds must be unique.')
+        if any(seed < 0 for seed in args.seeds):
+            parser.error('--seeds must be non-negative.')
+        for run_group in all_run_groups:
+            try:
+                for seed in args.seeds:
+                    expand_run_group_template(run_group, seed)
+            except ValueError as exc:
+                parser.error(str(exc))
+    else:
+        for run_group in all_run_groups:
+            validate_run_group(run_group)
 
     if not (
         args.window_run_groups
@@ -254,10 +336,16 @@ def parse_args() -> argparse.Namespace:
         parser.error('--n-branches must be positive.')
 
     try:
-        args.label_overrides = parse_key_value_overrides(args.label, '--label')
+        allow_seed_template = args.seeds is not None
+        args.label_overrides = parse_key_value_overrides(
+            args.label,
+            '--label',
+            allow_seed_template=allow_seed_template,
+        )
         args.plot_label_overrides = parse_key_value_overrides(
             args.plot_label,
             '--plot-label',
+            allow_seed_template=allow_seed_template,
         )
     except argparse.ArgumentTypeError as exc:
         parser.error(str(exc))
@@ -303,9 +391,10 @@ def selected_families(specs: list[RunSpec]) -> set[str]:
 
 
 def default_out_dir(args: argparse.Namespace) -> Path:
+    baseline = args.baseline_run_group.replace('{seed}', 'multiseed')
     return (
         Path('outputs/plots/retrieval_reductions_ablations')
-        / f'{args.baseline_run_group}-{args.n_branches}branches'
+        / f'{baseline}-{args.n_branches}branches'
     )
 
 
@@ -326,6 +415,7 @@ def find_run_dir_and_config(
     experiments_root: Path,
     run_group: str,
     n_branches: int,
+    seed: int | None = None,
 ) -> tuple[Path, dict[str, Any]]:
     group_dir = experiments_root / run_group
     if not group_dir.is_dir():
@@ -337,22 +427,35 @@ def find_run_dir_and_config(
         config = read_config(config_path)
         if config.get('n_channels_unmix') != n_branches:
             continue
+        if seed is not None:
+            if 'seed' not in config or config['seed'] is None:
+                continue
+            try:
+                config_seed = int(config['seed'])
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    f'Invalid seed in {config_path}: {config["seed"]!r}'
+                ) from exc
+            if config_seed != int(seed):
+                continue
         run_name = str(config.get('run_name') or '')
         run_dir = config_path.parent
         if branch_token not in run_dir.name and branch_token not in run_name:
             continue
         matches.append((run_dir, config))
 
+    seed_msg = f', seed={seed}' if seed is not None else ''
     if not matches:
         raise FileNotFoundError(
             f'No run with n_channels_unmix={n_branches} and {branch_token!r} '
-            f'in run directory name or config run_name found in group: {group_dir}'
+            f'in run directory name or config run_name{seed_msg} found in '
+            f'group: {group_dir}'
         )
     if len(matches) > 1:
         names = ', '.join(path.name for path, _ in matches)
         raise RuntimeError(
-            f'Expected one {n_branches}-branch run directory in {group_dir}, '
-            f'found: {names}'
+            f'Expected one {n_branches}-branch{seed_msg} run directory in '
+            f'{group_dir}, found: {names}'
         )
     return matches[0]
 
@@ -644,12 +747,17 @@ def load_result_row(
     baseline_top10: float | None = None,
     baseline_n_windows: int | None = None,
     audit_training_artifacts: bool = False,
+    seed: int | None = None,
+    run_dir: Path | None = None,
+    config: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], list[dict[str, str]]]:
-    run_dir, config = find_run_dir_and_config(
-        experiments_root,
-        spec.run_group,
-        n_branches,
-    )
+    if run_dir is None or config is None:
+        run_dir, config = find_run_dir_and_config(
+            experiments_root,
+            spec.run_group,
+            n_branches,
+            seed=seed,
+        )
     config_path = run_dir / 'config.json'
     metrics_path = run_dir / 'metrics.csv'
     final_test_path = run_dir / 'final_test_per_window.csv'
@@ -688,10 +796,12 @@ def load_result_row(
     last_epoch, early_stop_epoch, best_epoch = read_epoch_info(metrics_path)
     delta_top1 = 0.0 if baseline_top1 is None else top1 - baseline_top1
     delta_top10 = 0.0 if baseline_top10 is None else top10 - baseline_top10
+    row_seed = seed if seed is not None else config.get('seed')
 
     row = {
         'family': spec.family,
         'run_group': spec.run_group,
+        'seed': row_seed,
         'label': spec.label,
         'method': spec.method,
         'dim': spec.dim,
@@ -712,6 +822,7 @@ def load_result_row(
         {
             'family': spec.family,
             'run_group': spec.run_group,
+            'seed': row_seed,
             'key': key,
             'baseline_value': format_config_value(baseline_value),
             'run_value': format_config_value(run_value),
@@ -719,6 +830,21 @@ def load_result_row(
         for key, (baseline_value, run_value) in diffs.items()
     ]
     return row, diff_rows
+
+
+def _resolved_run_group(template: str, seed: int | None) -> str:
+    if seed is None:
+        return template
+    return expand_run_group_template(template, seed)
+
+
+def _warn_missing_run(kind: str, template: str, seed: int, exc: FileNotFoundError) -> None:
+    warnings.warn(
+        f'Missing {kind} for template {template!r} seed={seed} ({exc}). '
+        'Skipping this seed.',
+        UserWarning,
+        stacklevel=3,
+    )
 
 
 def load_results(
@@ -729,49 +855,126 @@ def load_results(
     label_overrides: dict[str, str],
     plot_label_overrides: dict[str, str],
     audit_training_artifacts: bool,
+    seeds: list[int] | None = None,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
-    baseline_run_dir, baseline_config = find_run_dir_and_config(
-        experiments_root,
-        baseline_spec.run_group,
-        n_branches,
-    )
-    baseline_row, _ = load_result_row(
-        experiments_root=experiments_root,
-        spec=baseline_spec,
-        n_branches=n_branches,
-        baseline_config=baseline_config,
-        label_overrides=label_overrides,
-        plot_label_overrides=plot_label_overrides,
-        audit_training_artifacts=audit_training_artifacts,
-    )
-    baseline_row['run_dir'] = str(baseline_run_dir)
+    requested_seeds: list[int | None] = list(seeds) if seeds is not None else [None]
+    baseline_by_seed: dict[int | None, tuple[dict[str, Any], dict[str, Any]]] = {}
 
-    rows = [baseline_row]
-    diff_rows: list[dict[str, str]] = []
-    for spec in specs:
-        row, run_diff_rows = load_result_row(
+    for seed in requested_seeds:
+        run_group = _resolved_run_group(baseline_spec.run_group, seed)
+        spec = replace(baseline_spec, run_group=run_group)
+        try:
+            run_dir, config = find_run_dir_and_config(
+                experiments_root,
+                run_group,
+                n_branches,
+                seed=seed,
+            )
+        except FileNotFoundError as exc:
+            if seed is None:
+                raise
+            _warn_missing_run('baseline', baseline_spec.run_group, seed, exc)
+            continue
+        baseline_row, _ = load_result_row(
             experiments_root=experiments_root,
             spec=spec,
             n_branches=n_branches,
-            baseline_config=baseline_config,
+            baseline_config=config,
             label_overrides=label_overrides,
             plot_label_overrides=plot_label_overrides,
-            baseline_top1=baseline_row['top1'],
-            baseline_top10=baseline_row['top10'],
-            baseline_n_windows=baseline_row['n_windows'],
             audit_training_artifacts=audit_training_artifacts,
+            seed=seed,
+            run_dir=run_dir,
+            config=config,
         )
-        rows.append(row)
-        diff_rows.extend(run_diff_rows)
+        baseline_row['run_dir'] = str(run_dir)
+        baseline_by_seed[seed] = (baseline_row, config)
+
+    if not baseline_by_seed:
+        raise RuntimeError(
+            f'No valid baseline runs found for template {baseline_spec.run_group!r} '
+            f'and seeds {list(seeds) if seeds is not None else []}.'
+        )
+
+    rows = [row for row, _ in baseline_by_seed.values()]
+    diff_rows: list[dict[str, str]] = []
+    for spec in specs:
+        n_loaded = 0
+        for seed, (baseline_row, baseline_config) in baseline_by_seed.items():
+            run_group = _resolved_run_group(spec.run_group, seed)
+            resolved_spec = replace(spec, run_group=run_group)
+            try:
+                run_dir, config = find_run_dir_and_config(
+                    experiments_root,
+                    run_group,
+                    n_branches,
+                    seed=seed,
+                )
+            except FileNotFoundError as exc:
+                if seed is None:
+                    raise
+                _warn_missing_run('run', spec.run_group, seed, exc)
+                continue
+            row, run_diff_rows = load_result_row(
+                experiments_root=experiments_root,
+                spec=resolved_spec,
+                n_branches=n_branches,
+                baseline_config=baseline_config,
+                label_overrides=label_overrides,
+                plot_label_overrides=plot_label_overrides,
+                baseline_top1=baseline_row['top1'],
+                baseline_top10=baseline_row['top10'],
+                baseline_n_windows=baseline_row['n_windows'],
+                audit_training_artifacts=audit_training_artifacts,
+                seed=seed,
+                run_dir=run_dir,
+                config=config,
+            )
+            rows.append(row)
+            diff_rows.extend(run_diff_rows)
+            n_loaded += 1
+        if n_loaded == 0 and seeds is not None:
+            warnings.warn(
+                f'Omitting condition {spec.run_group!r}: no valid paired seeds remain.',
+                UserWarning,
+                stacklevel=2,
+            )
 
     df = pd.DataFrame(rows)
     df['_family_order'] = df['family'].map(FAMILY_ORDER)
-    df = df.sort_values(['_family_order', 'order']).drop(columns=['_family_order'])
+    df = df.sort_values(['_family_order', 'order', 'seed'], kind='mergesort')
+    df = df.drop(columns=['_family_order'])
     diff_df = pd.DataFrame(
         diff_rows,
-        columns=['family', 'run_group', 'key', 'baseline_value', 'run_value'],
+        columns=['family', 'run_group', 'seed', 'key', 'baseline_value', 'run_value'],
     )
     return df.reset_index(drop=True), diff_df
+
+
+def summarize_multiseed_results(df: pd.DataFrame) -> pd.DataFrame:
+    group_cols = ['family', 'order', 'label', 'method', 'dim']
+    summary = (
+        df.groupby(group_cols, dropna=False, sort=False)
+        .agg(
+            n_seeds=('seed', 'nunique'),
+            top1_mean=('top1', 'mean'),
+            top1_min=('top1', 'min'),
+            top1_max=('top1', 'max'),
+            top10_mean=('top10', 'mean'),
+            top10_min=('top10', 'min'),
+            top10_max=('top10', 'max'),
+            delta_top1_mean=('delta_top1', 'mean'),
+            delta_top1_min=('delta_top1', 'min'),
+            delta_top1_max=('delta_top1', 'max'),
+            delta_top10_mean=('delta_top10', 'mean'),
+            delta_top10_min=('delta_top10', 'min'),
+            delta_top10_max=('delta_top10', 'max'),
+        )
+        .reset_index()
+    )
+    summary['_family_order'] = summary['family'].map(FAMILY_ORDER)
+    summary = summary.sort_values(['_family_order', 'order'], kind='mergesort')
+    return summary.drop(columns=['_family_order']).reset_index(drop=True)
 
 
 def write_table(df: pd.DataFrame, path_base: Path) -> None:
@@ -823,8 +1026,71 @@ def prepare_plot_style() -> None:
     )
 
 
+def _minmax_xerr(mean: pd.Series, lo: pd.Series, hi: pd.Series) -> np.ndarray:
+    lower = np.asarray(mean - lo, dtype=float)
+    upper = np.asarray(hi - mean, dtype=float)
+    return np.vstack([np.maximum(lower, 0.0), np.maximum(upper, 0.0)])
+
+
 def plot_ablation_delta(df: pd.DataFrame, out_dir: Path) -> None:
     subset = df[df['family'] == 'ablation'].copy()
+    if subset.empty:
+        return
+    multi = subset.groupby(['order', 'label']).size().max() > 1
+    if multi:
+        grouped = subset.groupby(['order', 'label'], as_index=False, sort=False).agg(
+            delta_top1=('delta_top1', 'mean'),
+            delta_top1_min=('delta_top1', 'min'),
+            delta_top1_max=('delta_top1', 'max'),
+            delta_top10=('delta_top10', 'mean'),
+            delta_top10_min=('delta_top10', 'min'),
+            delta_top10_max=('delta_top10', 'max'),
+            top1=('top1', 'mean'),
+        )
+        grouped['mean_delta'] = (grouped['delta_top1'] + grouped['delta_top10']) / 2.0
+        grouped = grouped.sort_values(['mean_delta', 'top1'], ascending=False)
+        xerr_top1 = _minmax_xerr(
+            grouped['delta_top1'],
+            grouped['delta_top1_min'],
+            grouped['delta_top1_max'],
+        )
+        xerr_top10 = _minmax_xerr(
+            grouped['delta_top10'],
+            grouped['delta_top10_min'],
+            grouped['delta_top10_max'],
+        )
+        error_kw = {'ecolor': '0.25', 'capsize': 2.5, 'elinewidth': 1.0}
+        fig, ax = plt.subplots(figsize=(7.8, 4.8))
+        y_positions = range(len(grouped))
+        height = 0.36
+        ax.barh(
+            [y - height / 2 for y in y_positions],
+            grouped['delta_top1'],
+            height=height,
+            xerr=xerr_top1,
+            error_kw=error_kw,
+            label='Top-1',
+            color='#4C78A8',
+        )
+        ax.barh(
+            [y + height / 2 for y in y_positions],
+            grouped['delta_top10'],
+            height=height,
+            xerr=xerr_top10,
+            error_kw=error_kw,
+            label='Top-10',
+            color='#F58518',
+        )
+        ax.axvline(0, color='0.35', linewidth=1.0, linestyle='--')
+        ax.set_yticks(list(y_positions))
+        ax.set_yticklabels(grouped['label'])
+        ax.invert_yaxis()
+        ax.set_xlabel('Change vs full model (percentage points)')
+        ax.set_ylabel('')
+        ax.legend(frameon=False, loc='upper left', fontsize=12)
+        save_figure(fig, out_dir, 'ablation_delta_barplot')
+        return
+
     subset['mean_delta'] = (subset['delta_top1'] + subset['delta_top10']) / 2.0
     subset = subset.sort_values(['mean_delta', 'top1'], ascending=False)
     fig, ax = plt.subplots(figsize=(7.8, 4.8))
@@ -856,44 +1122,106 @@ def plot_ablation_delta(df: pd.DataFrame, out_dir: Path) -> None:
 
 
 def plot_feature_reduction_curve(df: pd.DataFrame, out_dir: Path) -> None:
-    baseline = df[df['family'] == 'baseline'].iloc[0]
+    baseline_df = df[df['family'] == 'baseline']
+    if baseline_df.empty:
+        return
     subset = df[df['family'] == 'feature'].dropna(subset=['dim']).copy()
     if subset.empty:
         return
     subset['dim'] = subset['dim'].astype(int)
     dims = sorted(subset['dim'].unique())
     dim_to_x = {dim: idx for idx, dim in enumerate(dims)}
+    methods = list(dict.fromkeys(subset.sort_values('order')['method']))
+    colors = dict(zip(methods, sns.color_palette('colorblind', len(methods))))
+    multi = (
+        len(baseline_df) > 1 or subset.groupby(['method', 'dim']).size().max() > 1
+    )
 
     fig, axes = plt.subplots(1, 2, figsize=(11.2, 3.7), sharex=True)
     metric_info = [('top1', 'Top-1 (%)'), ('top10', 'Top-10 (%)')]
-    methods = list(dict.fromkeys(subset.sort_values('order')['method']))
-    colors = dict(zip(methods, sns.color_palette('colorblind', len(methods))))
 
-    for ax, (metric, ylabel) in zip(axes, metric_info, strict=True):
-        for method in methods:
-            method_df = subset[subset['method'] == method].sort_values('dim').copy()
-            method_df['xpos'] = method_df['dim'].map(dim_to_x)
-            ax.plot(
-                method_df['xpos'],
-                method_df[metric],
-                marker='o',
-                linewidth=2.0,
-                label=method,
-                color=colors[method],
-            )
-        ax.axhline(
-            baseline[metric],
-            color='0.35',
-            linewidth=1.2,
-            linestyle='--',
-            label='Full model' if metric == 'top1' else None,
+    if multi:
+        agg = subset.groupby(['method', 'dim'], as_index=False, sort=False).agg(
+            top1_mean=('top1', 'mean'),
+            top1_min=('top1', 'min'),
+            top1_max=('top1', 'max'),
+            top10_mean=('top10', 'mean'),
+            top10_min=('top10', 'min'),
+            top10_max=('top10', 'max'),
+            order=('order', 'min'),
         )
-        ax.set_xlim(-0.4, len(dims) - 0.6)
-        ax.set_xticks(range(len(dims)))
-        ax.set_xticklabels([str(dim) for dim in dims], rotation=0, ha='center')
-        ax.set_xlabel('Embedding dimension')
-        ax.set_ylabel(ylabel)
-        ax.margins(x=0.04)
+        for ax, (metric, ylabel) in zip(axes, metric_info, strict=True):
+            for method in methods:
+                method_df = agg[agg['method'] == method].sort_values('dim').copy()
+                method_df['xpos'] = method_df['dim'].map(dim_to_x)
+                color = colors[method]
+                lo = method_df[f'{metric}_min']
+                hi = method_df[f'{metric}_max']
+                if (hi > lo).any():
+                    ax.fill_between(
+                        method_df['xpos'],
+                        lo,
+                        hi,
+                        color=color,
+                        alpha=0.18,
+                        linewidth=0,
+                        label='_nolegend_',
+                        zorder=2,
+                    )
+                ax.plot(
+                    method_df['xpos'],
+                    method_df[f'{metric}_mean'],
+                    marker='o',
+                    linewidth=2.0,
+                    label=method,
+                    color=color,
+                    zorder=3,
+                )
+            base_vals = baseline_df[metric]
+            ax.axhline(
+                float(base_vals.mean()),
+                color='0.35',
+                linewidth=1.2,
+                linestyle='--',
+                label='Full model' if metric == 'top1' else None,
+            )
+            base_min = float(base_vals.min())
+            base_max = float(base_vals.max())
+            if base_max > base_min:
+                ax.axhspan(base_min, base_max, color='0.35', alpha=0.10, zorder=0)
+            ax.set_xlim(-0.4, len(dims) - 0.6)
+            ax.set_xticks(range(len(dims)))
+            ax.set_xticklabels([str(dim) for dim in dims], rotation=0, ha='center')
+            ax.set_xlabel('Embedding dimension')
+            ax.set_ylabel(ylabel)
+            ax.margins(x=0.04)
+    else:
+        baseline = baseline_df.iloc[0]
+        for ax, (metric, ylabel) in zip(axes, metric_info, strict=True):
+            for method in methods:
+                method_df = subset[subset['method'] == method].sort_values('dim').copy()
+                method_df['xpos'] = method_df['dim'].map(dim_to_x)
+                ax.plot(
+                    method_df['xpos'],
+                    method_df[metric],
+                    marker='o',
+                    linewidth=2.0,
+                    label=method,
+                    color=colors[method],
+                )
+            ax.axhline(
+                baseline[metric],
+                color='0.35',
+                linewidth=1.2,
+                linestyle='--',
+                label='Full model' if metric == 'top1' else None,
+            )
+            ax.set_xlim(-0.4, len(dims) - 0.6)
+            ax.set_xticks(range(len(dims)))
+            ax.set_xticklabels([str(dim) for dim in dims], rotation=0, ha='center')
+            ax.set_xlabel('Embedding dimension')
+            ax.set_ylabel(ylabel)
+            ax.margins(x=0.04)
 
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(
@@ -1042,19 +1370,26 @@ def main() -> None:
     prepare_out_dir(out_dir, args.overwrite)
 
     prepare_plot_style()
+    label_overrides = expand_label_overrides(args.label_overrides, args.seeds)
+    plot_label_overrides = expand_label_overrides(
+        args.plot_label_overrides,
+        args.seeds,
+    )
     df, diff_df = load_results(
         experiments_root=args.experiments_root,
         baseline_spec=baseline_spec,
         specs=specs,
         n_branches=args.n_branches,
-        label_overrides=args.label_overrides,
-        plot_label_overrides=args.plot_label_overrides,
+        label_overrides=label_overrides,
+        plot_label_overrides=plot_label_overrides,
         audit_training_artifacts=args.audit_training_artifacts,
+        seeds=args.seeds,
     )
 
     output_columns = [
         'family',
         'run_group',
+        'seed',
         'label',
         'method',
         'dim',
@@ -1076,6 +1411,12 @@ def main() -> None:
         float_format='%.6f',
     )
     diff_df.to_csv(out_dir / 'config_diffs.csv', index=False)
+    if args.seeds is not None:
+        summarize_multiseed_results(df).to_csv(
+            out_dir / 'summary_results.csv',
+            index=False,
+            float_format='%.6f',
+        )
     write_selected_tables_and_figures(df, families, out_dir)
     print_summary(df, families, out_dir)
 

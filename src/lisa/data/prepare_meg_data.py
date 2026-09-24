@@ -13,7 +13,15 @@ import pandas as pd
 from joblib import Parallel, delayed
 from tqdm import tqdm
 
-from lisa.data.meg_io import load_raw_meg, preprocess_meg
+from lisa.data.meg_io import (
+    assert_inverts_to_physical,
+    load_raw_meg,
+    meg_checksum,
+    preprocess_meg,
+    read_scaler_states,
+    scaler_state_for,
+    write_scaler_states,
+)
 from lisa.utils.constants import (
     AUDIO_SR,
     CLEAN_DATA_DIR,
@@ -180,7 +188,7 @@ def process_single_combo(
 
     # --- Preprocess MEG ---
     t0 = time.perf_counter()
-    meg, _ = preprocess_meg(
+    meg, _, scaler_state, physical_excerpt = preprocess_meg(
         raw=raw,
         target_fs=target_fs,
         first_onset=first_onset,
@@ -235,6 +243,8 @@ def process_single_combo(
     return {
         'subset': subset,
         'meg': meg,
+        'scaler_state': scaler_state,
+        'physical_excerpt': physical_excerpt,
         'df_entries': df_entries,
         'timing_rows': timing_rows,
     }
@@ -248,6 +258,7 @@ def main(
     meg_format: str,
     allow_test_only: bool,
     profile_log: bool,
+    verify_saved_scalers: bool,
     n_jobs: int,
 ):
     """Build preprocessed MEG arrays and metadata DataFrames.
@@ -260,6 +271,8 @@ def main(
         meg_format: "fif" or "bids".
         allow_test_only: Allow processing stories that only appear in test.
         profile_log: Whether to write timing logs.
+        verify_saved_scalers: Read the saved files back and check that every
+            recording inverts to the physical data it was built from.
         n_jobs: Number of parallel jobs (-1 for all CPUs, 1 for sequential).
     """
 
@@ -383,10 +396,14 @@ def main(
     # Aggregate results
     global_df_per_mode = {mode: {key: [] for key in ordered_columns} for mode in modes}
     global_meg_recordings = {}
+    global_scaler_states = {}
+    global_physical_excerpts = {}
     timing_rows = []
 
     for result in results:
         global_meg_recordings[result['subset']] = result['meg']
+        global_scaler_states[result['subset']] = result['scaler_state']
+        global_physical_excerpts[result['subset']] = result['physical_excerpt']
         timing_rows.extend(result['timing_rows'])
         for mode in modes:
             for key in ordered_columns:
@@ -415,10 +432,45 @@ def main(
     # Save MEG data
     out_dir = os.path.join(preprocessed_dir, 'meg')
     os.makedirs(out_dir, exist_ok=True)
-    np.savez(
-        os.path.join(out_dir, f'meg{N_SUBJECTS}_sr{target_fs}.npz'),
-        **global_meg_recordings,
-    )
+    meg_path = os.path.join(out_dir, f'meg{N_SUBJECTS}_sr{target_fs}.npz')
+    scalers_path = os.path.join(out_dir, f'meg{N_SUBJECTS}_sr{target_fs}_scalers.npz')
+    np.savez(meg_path, **global_meg_recordings)
+
+    # Save the scaling that was applied, so patterns can be returned to physical units
+    if set(global_scaler_states) != set(global_meg_recordings):
+        raise ValueError('Scaler states and MEG recordings have different keys.')
+    subsets = list(global_meg_recordings)
+    states = [global_scaler_states[subset] for subset in subsets]
+    for subset, state in zip(subsets, states):
+        meg = global_meg_recordings[subset]
+        if len(state['robust_scale']) != meg.shape[0]:
+            raise ValueError(f'Scaler channel count does not match MEG for {subset}.')
+        if state['n_times'] != meg.shape[1]:
+            raise ValueError(f'Scaler n_times does not match saved MEG for {subset}.')
+        if state['data_crc32'] != meg_checksum(meg):
+            raise ValueError(f'Scaler state does not belong to saved MEG for {subset}.')
+    write_scaler_states(scalers_path, subsets, states)
+
+    # Read both files back and check they invert to the physical data we started from
+    if verify_saved_scalers:
+        saved_scalers = read_scaler_states(scalers_path)
+        if not np.array_equal(saved_scalers['keys'], np.array(subsets)):
+            raise ValueError('Saved scaler keys do not match the saved recordings.')
+        with np.load(meg_path, allow_pickle=False) as saved_meg:
+            for subset in subsets:
+                meg = saved_meg[subset]
+                saved_state = scaler_state_for(saved_scalers, subset, meg)
+                if not np.array_equal(saved_state['ch_names'], states[0]['ch_names']):
+                    raise ValueError(f'Saved channel names are wrong for {subset}.')
+
+                physical = global_physical_excerpts[subset]
+                assert_inverts_to_physical(
+                    meg[:, : physical.shape[1]],
+                    saved_state,
+                    physical,
+                    f'The saved files for {subset}',
+                )
+        print(f'Verified saved scalers for {len(subsets)} recordings.')
 
 
 def parse_arguments() -> argparse.Namespace:
@@ -464,6 +516,12 @@ def parse_arguments() -> argparse.Namespace:
         help='Write timing logs to preprocessed_dir/preprocessing_logs/meg_preprocessing_timing.csv.',
     )
     parser.add_argument(
+        '--verify-saved-scalers',
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help='Read the saved files back and check they invert to physical units.',
+    )
+    parser.add_argument(
         '--n-jobs',
         type=int,
         default=1,
@@ -486,6 +544,7 @@ def main_cli() -> None:
         meg_format=args.meg_format,
         allow_test_only=args.allow_test_only,
         profile_log=args.profile_log,
+        verify_saved_scalers=args.verify_saved_scalers,
         n_jobs=args.n_jobs,
     )
 

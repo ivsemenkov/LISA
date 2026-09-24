@@ -12,12 +12,14 @@ from lisa.plots.branch_interpretation import (  # noqa: E402
     DEFAULT_MAIN_SPATIAL_ROUGHNESS_MAX,
     build_clustering_outputs as build_combined_outputs,
     correlation_similarity,
+    save_item_table_npz,
     validate_curated_assignments,
 )
 from lisa.plots.plot_branch_interpretations import (  # noqa: E402
     build_medoid_similarity,
     build_curated_cluster_specs,
     get_cluster_display_label,
+    load_cached_item_table,
     with_sequential_display_labels,
 )
 
@@ -137,6 +139,17 @@ def _residue_promotion_items(
     }
 
 
+def _nonconstant_feature_matrix() -> np.ndarray:
+    return np.array(
+        [
+            [1.00, 0.20, -0.40, 0.10],
+            [0.50, -1.00, 0.25, 0.00],
+            [-0.30, 0.60, 0.10, -0.80],
+        ],
+        dtype=np.float64,
+    )
+
+
 def test_correlation_similarity_rejects_near_constant_rows() -> None:
     features = np.array(
         [
@@ -148,6 +161,76 @@ def test_correlation_similarity_rejects_near_constant_rows() -> None:
 
     with pytest.raises(ValueError, match='near-constant rows'):
         correlation_similarity(features, feature_name='toy_features')
+
+
+def test_correlation_similarity_rejects_constant_physical_unit_rows() -> None:
+    features = np.array(
+        [
+            [1e-13, 1e-13, 1e-13],
+            [1e-13, 2e-13, 3e-13],
+        ],
+        dtype=np.float64,
+    )
+
+    with pytest.raises(ValueError, match='near-constant rows'):
+        correlation_similarity(features, feature_name='spatial_haufe')
+
+
+def test_correlation_similarity_rejects_all_zero_rows() -> None:
+    features = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 2.0, 3.0],
+        ],
+        dtype=np.float64,
+    )
+
+    with pytest.raises(ValueError, match='near-constant rows'):
+        correlation_similarity(features, feature_name='toy_features')
+
+
+def test_correlation_similarity_is_invariant_to_positive_rescaling() -> None:
+    features = _nonconstant_feature_matrix()
+    for absolute in (True, False):
+        reference = correlation_similarity(
+            features,
+            feature_name='spatial_haufe',
+            absolute=absolute,
+        )
+        for scale in (1e-20, 1e-15, 1.0, 1e15):
+            scaled = correlation_similarity(
+                features * scale,
+                feature_name='spatial_haufe',
+                absolute=absolute,
+            )
+            np.testing.assert_allclose(scaled, reference, rtol=0.0, atol=1e-12)
+
+
+def test_correlation_similarity_accepts_physical_unit_spatial_haufe_scale() -> None:
+    tesla = 1e-13
+    features = _nonconstant_feature_matrix()
+    physical = features * tesla
+    centered = physical - physical.mean(axis=1, keepdims=True)
+    centered_norms = np.linalg.norm(centered, axis=1)
+    assert np.all(centered_norms > 0.0)
+    assert np.all(centered_norms <= 1e-12)
+
+    reference = correlation_similarity(
+        features,
+        feature_name='spatial_haufe',
+        absolute=True,
+    )
+    physical_similarity = correlation_similarity(
+        physical,
+        feature_name='spatial_haufe',
+        absolute=True,
+    )
+    np.testing.assert_allclose(
+        physical_similarity,
+        reference,
+        rtol=0.0,
+        atol=1e-12,
+    )
 
 
 def test_validate_cluster_assignments_accepts_plot_compatible_schema() -> None:
@@ -280,3 +363,48 @@ def test_plot_medoid_similarity_supports_minimum_fusion() -> None:
     )
 
     assert np.array_equal(observed, temporal_similarity)
+
+
+def _minimal_item_table_for_cache() -> dict:
+    return {
+        'subjects': np.array([1], dtype=np.int64),
+        'branches': np.array([0], dtype=np.int64),
+        'spatial_patterns': np.ones((1, 3), dtype=np.float64),
+        'source_magnitudes': np.ones((1, 4), dtype=np.float64),
+        'temporal_patterns': np.ones((1, 5), dtype=np.float64),
+        'temporal_spectra_mag': np.ones((1, 6), dtype=np.float64),
+        'temporal_spectrum_freqs': np.arange(6, dtype=np.float64),
+        'demean_temporal_filters': True,
+    }
+
+
+def test_item_stat_cache_requires_physical_sensor_units(tmp_path: Path) -> None:
+    cache_path = tmp_path / 'items.npz'
+    items = _minimal_item_table_for_cache()
+    load_kwargs = dict(
+        item_stats_npz=cache_path,
+        subjects=[1],
+        n_branches=1,
+        target_fs=100.0,
+        demean_temporal_filters=True,
+    )
+    rerun = 'lisa-combined-cluster-branch-interpretations'
+    save_item_table_npz(items, cache_path)
+    loaded = load_cached_item_table(**load_kwargs)
+    np.testing.assert_array_equal(loaded['subjects'], [1])
+    np.testing.assert_array_equal(loaded['branches'], [0])
+
+    with np.load(cache_path, allow_pickle=False) as data:
+        payload = {key: np.array(data[key]) for key in data.files}
+    payload.pop('sensor_units')
+    np.savez(cache_path, **payload)
+    with pytest.raises(ValueError, match=rerun):
+        load_cached_item_table(**load_kwargs)
+
+    save_item_table_npz(items, cache_path)
+    with np.load(cache_path, allow_pickle=False) as data:
+        payload = {key: np.array(data[key]) for key in data.files}
+    payload['sensor_units'] = np.asarray('normalized')
+    np.savez(cache_path, **payload)
+    with pytest.raises(ValueError, match=rerun):
+        load_cached_item_table(**load_kwargs)

@@ -673,7 +673,7 @@ def test_signflip_uses_one_shared_subject_sign_across_features():
             [4.0, 40.0],
         ]
     )
-    result = ofa.one_sided_signflip_max_t(
+    result = ofa.two_sided_signflip_max_abs_t(
         effects,
         n_permutations=128,
         seed=11,
@@ -682,7 +682,129 @@ def test_signflip_uses_one_shared_subject_sign_across_features():
     # A perfectly scaled feature pair remains perfectly scaled before
     # studentization and receives the same t statistic in every sign flip.
     np.testing.assert_allclose(result['null_t'][:, 0], result['null_t'][:, 1])
+    np.testing.assert_allclose(
+        result['max_abs_t_null'],
+        np.max(np.abs(result['null_t']), axis=1),
+    )
     assert result['signs'].shape == (128, 4)
+    assert np.all(result['max_t_fwer_p'] >= result['raw_p'])
+
+
+def test_two_sided_signflip_is_sign_symmetric():
+    effects = np.array(
+        [
+            [1.5, -0.4],
+            [2.0, -1.1],
+            [2.5, 0.2],
+            [3.0, -0.8],
+            [1.0, 0.5],
+        ]
+    )
+    positive = ofa.two_sided_signflip_max_abs_t(
+        effects,
+        n_permutations=256,
+        seed=19,
+    )
+    negative = ofa.two_sided_signflip_max_abs_t(
+        -effects,
+        n_permutations=256,
+        seed=19,
+    )
+
+    np.testing.assert_allclose(positive['observed_abs_t'], negative['observed_abs_t'])
+    np.testing.assert_allclose(positive['raw_p'], negative['raw_p'])
+    np.testing.assert_allclose(positive['max_t_fwer_p'], negative['max_t_fwer_p'])
+    np.testing.assert_allclose(positive['max_abs_t_null'], negative['max_abs_t_null'])
+    np.testing.assert_allclose(positive['null_t'], -negative['null_t'])
+
+
+def test_two_sided_signflip_treats_equal_magnitude_signs_equivalently():
+    positive = np.array([[2.0], [2.0], [2.0], [2.0], [2.0], [2.0]])
+    mixed = np.column_stack((positive[:, 0], -positive[:, 0]))
+    result = ofa.two_sided_signflip_max_abs_t(
+        mixed,
+        n_permutations=200,
+        seed=5,
+    )
+
+    np.testing.assert_allclose(result['observed_t'][0], -result['observed_t'][1])
+    np.testing.assert_allclose(result['observed_abs_t'][0], result['observed_abs_t'][1])
+    np.testing.assert_allclose(result['raw_p'][0], result['raw_p'][1])
+    np.testing.assert_allclose(result['max_t_fwer_p'][0], result['max_t_fwer_p'][1])
+
+
+def test_two_sided_signflip_can_call_a_large_negative_effect_significant():
+    effects = np.full((27, 2), 0.05)
+    effects[:, 0] = -8.0
+    result = ofa.two_sided_signflip_max_abs_t(
+        effects,
+        n_permutations=2000,
+        seed=3,
+    )
+
+    assert result['observed_t'][0] < 0
+    assert result['raw_p'][0] < 0.01
+    assert result['max_t_fwer_p'][0] < 0.05
+    assert result['max_t_fwer_p'][0] >= result['raw_p'][0]
+    np.testing.assert_array_equal(
+        result['max_abs_t_null'],
+        np.max(np.abs(result['null_t']), axis=1),
+    )
+
+
+def test_pairwise_jaccard_matches_known_masks_and_empty_union():
+    masks = {
+        'a': np.array([1, 1, 0, 0, 1], dtype=bool),
+        'b': np.array([1, 0, 1, 0, 1], dtype=bool),
+        'empty': np.array([0, 0, 0, 0, 0], dtype=bool),
+        'also_empty': np.array([0, 0, 0, 0, 0], dtype=bool),
+    }
+    jaccard, containment = ofa.pairwise_jaccard(masks)
+
+    assert jaccard.loc['a', 'b'] == pytest.approx(2 / 4)
+    assert containment.loc['a', 'b'] == pytest.approx(2 / 3)
+    assert containment.loc['b', 'a'] == pytest.approx(2 / 3)
+    assert jaccard.loc['empty', 'also_empty'] == pytest.approx(1.0)
+    assert np.isnan(containment.loc['empty', 'a'])
+    assert containment.loc['a', 'empty'] == pytest.approx(0.0)
+
+
+def test_jaccard_uses_concatenated_test_material_masks():
+    present = {
+        'test.wav': np.array([1, 0, 1], dtype=bool),
+        'other.wav': np.array([1, 1], dtype=bool),
+        'ignored.wav': np.array([1, 1, 1, 1], dtype=bool),
+    }
+    windows = pd.DataFrame(
+        {'sound_fname': ['test.wav', 'other.wav', 'test.wav']}
+    )
+    mask = ofa.concatenate_test_present_mask(present, windows)
+    np.testing.assert_array_equal(mask, np.array([1, 0, 1, 1, 1], dtype=bool))
+
+
+def test_jaccard_heatmap_and_two_sided_metadata_smoke(tmp_path):
+    masks = {
+        'phoneme_stops_all': np.array([1, 1, 0, 0], dtype=bool),
+        'phoneme_vowels_all': np.array([0, 1, 1, 0], dtype=bool),
+        'word_onset': np.array([0, 0, 0, 1], dtype=bool),
+    }
+    jaccard, _containment = ofa.pairwise_jaccard(masks)
+    png = tmp_path / 'feature_mask_jaccard.png'
+    ofa.plot_jaccard_heatmap(jaccard, png)
+    assert png.exists() and png.stat().st_size > 0
+
+    effects = np.array(
+        [
+            [1.0, -1.0],
+            [1.2, -1.1],
+            [0.8, -0.9],
+            [1.1, -1.2],
+        ]
+    )
+    result = ofa.two_sided_signflip_max_abs_t(
+        effects, n_permutations=64, seed=1
+    )
+    assert np.all(result['max_abs_t_null'] == np.max(np.abs(result['null_t']), axis=1))
     assert np.all(result['max_t_fwer_p'] >= result['raw_p'])
 
 
@@ -702,9 +824,9 @@ def test_control_saturation_overrides_a_significant_positive_effect():
 @pytest.mark.parametrize(
     ('mean_effect', 'corrected_p', 'expected'),
     [
-        (5.0, 0.001, 'evidence_of_annotation_associated_meg_use'),
+        (5.0, 0.001, 'significant_positive_effect'),
         (5.0, 0.2, 'inconclusive'),
-        (-5.0, 0.001, 'inconclusive'),
+        (-5.0, 0.001, 'significant_negative_effect'),
     ],
 )
 def test_feature_conclusion_is_limited_and_directional(

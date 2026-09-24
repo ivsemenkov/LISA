@@ -26,8 +26,10 @@ from lisa.plots.branch_interpretation import (
 from lisa.utils.constants import (
     BRANCH_INTERPRETATION_ASSIGNMENTS_DIR,
     CLEAN_DATA_DIR,
+    DATA_ROOT,
     EXPERIMENTS_DIR,
     N_SUBJECTS,
+    OUTPUTS_DIR,
     PREPROCESSED_DATA_DIR,
 )
 from lisa.utils.validators import validate_run_group
@@ -90,19 +92,19 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument('--meg-format', choices=('bids', 'fif'), default='fif')
     parser.add_argument('--preprocessed-meg-path', default=None)
     parser.add_argument(
-        '--raw-meg',
-        action=argparse.BooleanOptionalAction,
-        default=False,
+        '--raw-bids-root',
+        default=str(Path(DATA_ROOT) / 'MASC-MEG'),
+        help='Canonical raw/BIDS root used for participant ELP/HSP/MRK geometry.',
     )
     parser.add_argument(
-        '--preprocess',
-        action=argparse.BooleanOptionalAction,
-        default=True,
+        '--geometry-cache-dir',
+        default=str(Path(OUTPUTS_DIR) / 'source_geometry'),
+        help='Directory for cached participant head to fsaverage transforms.',
     )
     parser.add_argument(
         '--demean-temporal-filters',
         action=argparse.BooleanOptionalAction,
-        default=True,
+        default=False,
         help='Subtract each temporal-filter mean before feature extraction.',
     )
     parser.add_argument(
@@ -140,7 +142,7 @@ def main() -> None:
         experiments_root=args.experiments_root,
         run_group=args.run_group,
     )
-    if args.preprocessed_meg_path is None and not args.raw_meg:
+    if args.preprocessed_meg_path is None:
         args.preprocessed_meg_path = (
             Path(PREPROCESSED_DATA_DIR)
             / 'meg'
@@ -156,10 +158,10 @@ def main() -> None:
         offset_gap=args.offset_gap,
         meg_format=args.meg_format,
         data_root=args.meg_files_dir,
-        raw_meg=args.raw_meg,
         preprocessed_meg_path=args.preprocessed_meg_path,
-        preprocess=args.preprocess,
         demean_temporal_filters=args.demean_temporal_filters,
+        raw_bids_root=args.raw_bids_root,
+        geometry_cache_dir=args.geometry_cache_dir,
     )
     metadata = {
         'item_source': 'model',
@@ -172,15 +174,13 @@ def main() -> None:
         'meg_files_dir': str(args.meg_files_dir),
         'meg_format': str(args.meg_format),
         'offset_gap': float(args.offset_gap),
-        'preprocessed_meg_path': (
-            str(args.preprocessed_meg_path) if args.preprocessed_meg_path else None
-        ),
-        'raw_meg': bool(args.raw_meg),
-        'preprocess': bool(args.preprocess),
-        'source_raw_metadata_only': bool(not args.raw_meg),
+        'preprocessed_meg_path': str(args.preprocessed_meg_path),
+        'raw_bids_root': str(args.raw_bids_root),
+        'geometry_cache_dir': str(args.geometry_cache_dir),
         'demean_temporal_filters': bool(args.demean_temporal_filters),
         'n_branches': int(n_branches),
         'extraction_timing_seconds': items['extraction_timing_seconds'],
+        'coregistration_qc': items['coregistration_qc'],
     }
     paths = resolve_output_paths(
         args.outdir,

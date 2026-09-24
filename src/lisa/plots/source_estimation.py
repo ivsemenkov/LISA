@@ -1,9 +1,9 @@
 """Source-space estimation and rendering helpers for branch interpretations."""
 
 import io
-import os
 from contextlib import contextmanager
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 import matplotlib.pyplot as plt
@@ -14,29 +14,32 @@ from mne.minimum_norm import apply_inverse, make_inverse_operator
 from mne.utils._logging import use_log_level
 from PIL import Image
 
-from lisa.utils.constants import PREPROCESSED_DATA_DIR
-
 
 SOURCE_RENDER_FIGSIZE_IN = (4.0, 3.0)
 SOURCE_RENDER_LIMIT_PAD_FRAC = 0.15
 SOURCE_RENDER_OUTPUT_PAD_FRAC = 0.08
+FSAVERAGE_BEM_ICO = 4
+FSAVERAGE_BEM_CONDUCTIVITY = (0.3,)
+INVERSE_LOOSE = 0.5
+INVERSE_DEPTH = 0.5
+INVERSE_LAMBDA2 = 1.0 / 3
+INVERSE_METHOD = 'MNE'
 
 
 @dataclass(frozen=True)
 class PreparedSourceGeometry:
-    """Subject-independent fsaverage geometry reused across source estimates."""
+    """Subject-independent fsaverage source space and single-layer MEG BEM."""
 
     subject: str
     subjects_dir: str
     src: Any
     bem: Any
-    trans: str
 
 
 def prepare_source_geometry() -> PreparedSourceGeometry:
     """Prepare the fsaverage source space and BEM shared by all subjects."""
-    fs_dir = fetch_fsaverage(verbose=False)
-    subjects_dir = os.path.dirname(fs_dir)
+    fs_dir = Path(fetch_fsaverage(verbose=False))
+    subjects_dir = str(fs_dir.parent)
     subject = 'fsaverage'
     src = mne.setup_source_space(
         subject,
@@ -46,59 +49,90 @@ def prepare_source_geometry() -> PreparedSourceGeometry:
         verbose=False,
     )
     model = mne.make_bem_model(
-        subject=subject, subjects_dir=subjects_dir, verbose=False
+        subject=subject,
+        ico=FSAVERAGE_BEM_ICO,
+        conductivity=FSAVERAGE_BEM_CONDUCTIVITY,
+        subjects_dir=subjects_dir,
+        verbose=False,
     )
     bem = mne.make_bem_solution(model, verbose=False)
-    trans = os.path.join(PREPROCESSED_DATA_DIR, 'coords', 'trans-meg_new.fif')
     return PreparedSourceGeometry(
         subject=subject,
         subjects_dir=subjects_dir,
         src=src,
         bem=bem,
-        trans=trans,
+    )
+
+
+def fsaverage_stc_template(
+    *,
+    n_times: int = 1,
+    prepared_geometry: PreparedSourceGeometry | None = None,
+) -> mne.SourceEstimate:
+    """Empty fsaverage STC used only as a plotting/source-space container."""
+
+    geometry = prepared_geometry or prepare_source_geometry()
+    vertices = [geometry.src[0]['vertno'], geometry.src[1]['vertno']]
+    n_vertices = int(sum(len(hemi) for hemi in vertices))
+    data = np.zeros((n_vertices, n_times), dtype=np.float64)
+    return mne.SourceEstimate(
+        data,
+        vertices=vertices,
+        tmin=0.0,
+        tstep=1.0,
+        subject=geometry.subject,
     )
 
 
 def get_stc(
-    raw: mne.io.BaseRaw,
     spatial_patterns: np.ndarray,
     *,
+    info: Any,
+    trans: Any,
     prepared_geometry: PreparedSourceGeometry | None = None,
+    fwd: Any | None = None,
+    n_jobs: int = 3,
 ) -> mne.SourceEstimate:
-    """Compute source estimates for spatial patterns using fsaverage.
+    """Project sensor-space patterns through participant-specific fsaverage geometry.
 
     Args:
-        raw: MNE Raw object for sensor info.
-        spatial_patterns: Array (branches, channels).
-        prepared_geometry: Optional shared source space and BEM. When omitted,
-            geometry is prepared for this call as before.
-
-    Returns:
-        stc: SourceEstimate for patterns.
+        spatial_patterns: Array (branches, channels) in physical sensor units.
+        info: Participant-specific reconstructed KIT Info.
+        trans: Participant-specific head to fsaverage transform.
+        prepared_geometry: Shared fsaverage source space and BEM.
+        fwd: Optional precomputed participant forward. When omitted, a forward
+            is built from ``info`` and ``trans``.
+        n_jobs: Workers for ``make_forward_solution``.
     """
     geometry = prepared_geometry or prepare_source_geometry()
+    if fwd is None:
+        meg_types = info.get_channel_types(picks='data', unique=True)
+        fwd = mne.make_forward_solution(
+            info,
+            trans=trans,
+            src=geometry.src,
+            bem=geometry.bem,
+            eeg=False,
+            meg=meg_types[0],
+            n_jobs=n_jobs,
+            verbose=False,
+        )
 
-    fwd = mne.make_forward_solution(
-        raw.info,
-        trans=geometry.trans,
-        src=geometry.src,
-        bem=geometry.bem,
-        eeg=False,
-        meg=raw.get_channel_types(picks='data', unique=True)[0],
-        n_jobs=3,
+    ad_hoc_cov = mne.make_ad_hoc_cov(info)
+    inverse_operator = make_inverse_operator(
+        info,
+        fwd,
+        ad_hoc_cov,
+        loose=INVERSE_LOOSE,
+        depth=INVERSE_DEPTH,
         verbose=False,
     )
-
-    ad_hoc_cov = mne.make_ad_hoc_cov(raw.info)
-    inverse_operator = make_inverse_operator(
-        raw.info, fwd, ad_hoc_cov, loose=0.5, depth=0.5, verbose=False
-    )
-    evoked = mne.EvokedArray(spatial_patterns.T, raw.info)
+    evoked = mne.EvokedArray(spatial_patterns.T, info)
     stc = apply_inverse(
         evoked,
         inverse_operator,
-        lambda2=1.0 / 3,
-        method='MNE',
+        lambda2=INVERSE_LAMBDA2,
+        method=INVERSE_METHOD,
         verbose=False,
     )
 

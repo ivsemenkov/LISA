@@ -204,12 +204,15 @@ def load_metrics(
     run_groups: list[str],
     epochs: Iterable[int | str] | None,
     k_special: int = 270,
+    validation_metrics: bool = False,
 ) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     """Load metrics across runs in one or more run-groups and return dataframes for plotting.
 
     Finds run dirs under experiments_root/<run_group>/*/config.json for each run_group.
     Configs must be identical except for CONFIG_ALLOWED_DIFFERENCES (e.g. same architecture).
     Returns long-format df (one row per run per Epoch per K) for seaborn lineplot.
+    For epoch='best', the checkpoint is always the min-loss_val epoch; plotted values
+    are final-test metrics unless validation_metrics is True.
 
     Returns:
         df_long: DataFrame with Run group, Epoch, K, Top 1, Top 10 (one row per run).
@@ -268,13 +271,16 @@ def load_metrics(
         for epoch in epoch_iter:
             if epoch == 'best':
                 epoch_name = 'Best validation checkpoint'
+                epoch_metric_cols = (
+                    validation_cols if validation_metrics else final_cols
+                )
             else:
                 epoch_name = f'Epoch {epoch}'
+                epoch_metric_cols = validation_cols
             row = {'Run group': run_group, 'Epoch': epoch_name, 'K': K}
-            epoch_metric_cols = final_cols if epoch == 'best' else validation_cols
             for metric_id, metric_name in epoch_metric_cols.items():
                 if epoch == 'best':
-                    required_cols = {'loss_val', *final_cols}
+                    required_cols = {'loss_val', *epoch_metric_cols}
                     missing_cols = required_cols - set(metrics_df.columns)
                     if missing_cols:
                         raise ValueError(
@@ -342,6 +348,7 @@ def plot_metrics(
     k_special: int = 270,
     use_log_scale: bool = True,
     x_ticks: Sequence[int] | None = None,
+    validation_metrics: bool = False,
 ) -> None:
     """Plot Top-1 and Top-10 accuracy vs K and save as PDF.
 
@@ -480,7 +487,10 @@ def plot_metrics(
                     alpha=0.7,
                 )
 
-        ax.set_ylabel('Top-10 accuracy' if '10' in metric_name else 'Top-1 accuracy')
+        ylabel = 'Top-10 accuracy' if '10' in metric_name else 'Top-1 accuracy'
+        if validation_metrics:
+            ylabel = f'{ylabel} (validation)'
+        ax.set_ylabel(ylabel)
         ax.set_xlabel('' if ax_idx == 0 else 'K (unmix channels)')
         if use_log_scale:
             ax.set_xscale('log')
@@ -533,7 +543,7 @@ def plot_metrics(
     plt.close(fig)
 
 
-def parse_arguments() -> argparse.Namespace:
+def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse CLI arguments for metrics plotting."""
 
     def epoch_or_best(v: str):
@@ -628,7 +638,16 @@ def parse_arguments() -> argparse.Namespace:
         help='K values to show on x-axis (only those present in data are shown). '
         'Default: scale-specific set (e.g. 1,10,25,... for linear; 1,5,10,... for log).',
     )
-    args = p.parse_args()
+    p.add_argument(
+        '--validation-metrics',
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            'For --epochs best, plot top1s_val/top10s_val at the min-loss_val '
+            'checkpoint instead of final-test metrics. Numeric --epochs are unchanged.'
+        ),
+    )
+    args = p.parse_args(argv)
     for rg in args.run_group:
         validate_run_group(rg)
     if args.highlight_run_group is not None:
@@ -656,10 +675,13 @@ def main_cli():
         run_groups=args.run_group,
         epochs=args.epochs,
         k_special=args.k_special,
+        validation_metrics=args.validation_metrics,
     )
     run_group_label = (
         args.output_name if args.output_name is not None else '-'.join(args.run_group)
     )
+    if args.validation_metrics and 'validation' not in run_group_label.lower():
+        run_group_label = f'{run_group_label}-validation'
     line_labels = args.line_labels if args.line_labels is not None else args.run_group
     label_by_group = dict(zip(args.run_group, line_labels))
     df_long['Line label'] = df_long['Run group'].map(label_by_group)
@@ -677,6 +699,7 @@ def main_cli():
         k_special=args.k_special,
         use_log_scale=args.log_scale,
         x_ticks=tuple(args.x_ticks) if args.x_ticks else None,
+        validation_metrics=args.validation_metrics,
     )
 
 

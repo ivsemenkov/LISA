@@ -7,8 +7,8 @@
 </p>
 
 <p align="center">
-  <a href="documentation/assets/LISA.png">
-    <img src="documentation/assets/LISA.png" alt="LISA architecture and analysis pipeline" width="900">
+  <a href="docs/assets/architecture.png">
+    <img src="docs/assets/architecture.png" alt="LISA architecture and analysis pipeline" width="900">
   </a>
 </p>
 
@@ -187,45 +187,54 @@ The main generated inputs are:
 ```text
 data/preprocessed/audio/       Wav2Vec2 audio embeddings
 data/preprocessed/dataframe/   segment metadata and MEG/audio alignment
-data/preprocessed/meg/         preprocessed 100 Hz MEG arrays
+data/preprocessed/meg/         preprocessed 100 Hz MEG arrays and scaler sidecar
 outputs/plots/meg_qc/          preprocessing quality-control reports
 ```
 
-The repository also includes three MEG-MASC-specific coordinate assets under
+MEG preprocessing writes normalized arrays such as
+`data/preprocessed/meg/meg27_sr100.npz` and the scaler sidecar
+`data/preprocessed/meg/meg27_sr100_scalers.npz`. Training uses the normalized
+MEG. Physiological and source interpretation load the sidecar to invert the
+channel preprocessing transform and restore physical sensor scaling.
+
+The repository also includes MEG-MASC-specific coordinate assets under
 `data/preprocessed/coords/`:
 
 - `sensor_xyz.npy` contains the 3D positions of the 208 MEG sensors used by
-  3D spatial attention;
+  3D spatial attention; and
 - `coords208_xy_scaled.npy` contains normalized 2D sensor positions used by
-  2D spatial attention, spatial dropout, and sensor-neighbour analyses; and
-- `trans-meg_new.fif` is a manually created coregistration transform that
-  aligns the MEG-MASC head coordinate frame with the MNE `fsaverage` anatomy
-  used for template-space source visualizations.
+  2D spatial attention, spatial dropout, and sensor-neighbour analyses.
 
-These bundled files are specific to the MEG-MASC sensor layout. When adapting
-LISA to another layout, provide the corresponding sensor coordinates. The
-coregistration transform is used only by source-space analyses, not for
-training.
+Source analysis uses participant- and session-specific KIT sensor geometry.
+It reads the raw BIDS digitization and marker files (ELP, HSP, and MRK),
+builds a participant-specific sensor-to-head coregistration and forward
+solution, and places the group analysis in the shared MNE `fsaverage`
+coordinate frame. Training does not use that source geometry.
+
+`sensor_xyz.npy` and `coords208_xy_scaled.npy` are specific to the MEG-MASC
+sensor layout. When adapting LISA to another layout, provide the corresponding
+sensor coordinates.
 
 ### Disk space for MEG-MASC
 
 Starting from the downloaded MEG-MASC data, the current cleaned-data pipeline
 requires approximately **300 GB of free disk space during preparation**. The raw
 recordings, cleaned FIF files, and preprocessed arrays must coexist while
-`prepare_dataset.sh clean ...` runs.
+`prepare_dataset.sh clean ...` runs. Training reads normalized MEG from
+`data/preprocessed/`.
 
-The 300 GB requirement is temporary. After preparation finishes successfully
-and the generated inputs have been checked, training reads from
-`data/preprocessed/` rather than the raw BIDS recordings. You can then delete
-`data/MASC-MEG/sub-*` to recover approximately 100 GB. Keep the stimuli,
-`data/clean/`, and `data/preprocessed/` to reproduce the complete training,
-analysis, and figure workflow; together they occupy about 180 GB.
+A training-only workflow can use those prepared arrays. The main 3-second
+preprocessed inputs occupy approximately 18 GB. After they exist, deleting
+`data/MASC-MEG/sub-*` recovers approximately 100 GB. The stimuli,
+`data/clean/`, and `data/preprocessed/` that remain occupy about 180 GB.
 
-If you only want to train from the generated inputs and do not need the complete
-analysis workflow, you can retain only the approximately 18 GB
-`data/preprocessed/` tree. Those inputs are not distributed with this
+Complete revised source and localization reproduction also requires the
+original digitization and marker geometry in the BIDS tree
+(`data/MASC-MEG/sub-*/ses-*/meg/`, including the ELP, HSP, and MRK files).
+Keep those files, the stimuli, `data/clean/`, and `data/preprocessed/` when
+reproducing that analysis. The prepared arrays are not distributed with this
 repository, so a from-scratch MEG-MASC reproduction still encounters the 300 GB
-preparation peak before files can be deleted.
+preparation peak.
 
 None of these MEG-MASC storage requirements apply when using the LISA
 architecture with your own data.
@@ -262,17 +271,18 @@ constraints.
 paper's experiment workflow. It contains:
 
 - preprocessing checks and canonical sample counts;
-- the complete 210-run experiment matrix;
+- the complete 320-run final-paper training matrix;
 - the common training protocol and exact command loops;
 - sanity values for the selected model;
-- commands for every table and figure; and
+- commands for the maintained training, evaluation, and interpretation
+  analyses used in the paper; and
 - smaller reproduction paths when the full matrix is unnecessary.
 
 The complete workflow is intentionally not duplicated here. A full reproduction
-needs approximately 300 GB only at the preparation peak; removing the raw
-recordings afterward reduces the retained cleaned-data working set to about
-180 GB. The main 3-second preprocessed inputs occupy approximately 18 GB, and
-the 210-run experiment tree adds about 7 GB.
+needs approximately 300 GB only at the preparation peak. Training can use the
+prepared arrays; revised source reproduction also keeps the BIDS digitization
+and marker files. The main 3-second preprocessed inputs occupy approximately
+18 GB.
 
 ## Using LISA on another task
 

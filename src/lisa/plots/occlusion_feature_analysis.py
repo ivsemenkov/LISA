@@ -1550,6 +1550,158 @@ def summarize_eligibility(records: Sequence[EligibilityRecord]) -> dict[str, Any
     }
 
 
+def _mean_or_nan(values: Sequence[float]) -> float:
+    array = np.asarray(values, dtype=np.float64)
+    if array.size == 0:
+        return float('nan')
+    return float(np.mean(array))
+
+
+def concatenate_test_present_mask(
+    present: dict[str, np.ndarray],
+    test_windows: pd.DataFrame,
+) -> np.ndarray:
+    """Exact dilated present mask on test sounds, concatenated in first-seen order."""
+
+    if 'sound_fname' not in test_windows.columns:
+        raise ValueError('test_windows must include sound_fname.')
+    sounds = list(dict.fromkeys(test_windows['sound_fname'].astype(str).tolist()))
+    if not sounds:
+        raise ValueError('test_windows does not name any test sounds.')
+    missing = [sound for sound in sounds if sound not in present]
+    if missing:
+        raise KeyError(f'Present masks missing test sounds: {missing[:10]}.')
+    parts = [np.asarray(present[sound], dtype=bool).reshape(-1) for sound in sounds]
+    return np.concatenate(parts)
+
+
+def pairwise_jaccard(
+    masks: dict[str, np.ndarray],
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Pairwise Jaccard and directed containment for equal-length binary masks.
+
+    Jaccard of two empty masks is 1. Directed containment is NaN when the
+    source mask has empty support.
+    """
+
+    names = list(masks)
+    if not names:
+        raise ValueError('pairwise_jaccard requires at least one mask.')
+    arrays = [np.asarray(masks[name], dtype=bool).reshape(-1) for name in names]
+    lengths = {array.size for array in arrays}
+    if len(lengths) != 1:
+        raise ValueError('All masks must have the same length for Jaccard overlap.')
+    n_features = len(names)
+    jaccard = np.zeros((n_features, n_features), dtype=np.float64)
+    containment = np.full((n_features, n_features), np.nan, dtype=np.float64)
+    supports = [int(array.sum()) for array in arrays]
+    for i, left in enumerate(arrays):
+        for j, right in enumerate(arrays):
+            intersection = int(np.logical_and(left, right).sum())
+            union = int(np.logical_or(left, right).sum())
+            jaccard[i, j] = 1.0 if union == 0 else intersection / union
+            if supports[i] > 0:
+                containment[i, j] = intersection / supports[i]
+    return (
+        pd.DataFrame(jaccard, index=names, columns=names),
+        pd.DataFrame(containment, index=names, columns=names),
+    )
+
+
+def plot_jaccard_heatmap(jaccard: pd.DataFrame, output_path: Path) -> None:
+    """Labelled square heatmap of pairwise feature-mask Jaccard overlap."""
+
+    if jaccard.empty:
+        raise ValueError('Cannot plot an empty Jaccard matrix.')
+    if jaccard.shape[0] != jaccard.shape[1]:
+        raise ValueError('Jaccard heatmap requires a square matrix.')
+    labels = [
+        PLOT_DISPLAY_NAMES.get(str(name), str(name)) for name in jaccard.columns
+    ]
+    values = jaccard.to_numpy(dtype=np.float64)
+    n_features = len(labels)
+    figure_size = max(4.5, 0.38 * n_features + 2.4)
+    fig, ax = plt.subplots(figsize=(figure_size, figure_size * 0.92))
+    image = ax.imshow(values, vmin=0.0, vmax=1.0, cmap='viridis', origin='upper')
+    ax.set_xticks(np.arange(n_features))
+    ax.set_yticks(np.arange(n_features))
+    ax.set_xticklabels(labels, rotation=45, ha='right')
+    ax.set_yticklabels(labels)
+    ax.set_title('Feature-mask Jaccard overlap')
+    fig.colorbar(image, ax=ax, fraction=0.046, pad=0.04, label='Jaccard')
+    fig.tight_layout()
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(output_path, dpi=180, bbox_inches='tight')
+    plt.close(fig)
+
+
+def mask_interval_lengths(mask: np.ndarray) -> list[int]:
+    return [stop - start for start, stop in connected_components(mask)]
+
+
+def summarize_feature_diagnostics(
+    state: FeatureState,
+    *,
+    test_windows: pd.DataFrame,
+    donor_sounds: set[str],
+    plans: dict[int, WindowPlan],
+    donor_cache: dict[int, DonorCandidatePool],
+    eligibility: dict[str, Any],
+) -> dict[str, Any]:
+    """Feature diagnostics derived from the canonical occlusion objects."""
+
+    test_mask = concatenate_test_present_mask(state.present, test_windows)
+    test_interval_lengths = mask_interval_lengths(test_mask)
+    donor_present_intervals = 0
+    donor_absent_intervals = 0
+    donor_present_frames = 0
+    donor_absent_frames = 0
+    for sound in sorted(donor_sounds):
+        present = np.asarray(state.present[sound], dtype=bool)
+        absent = np.asarray(state.absent[sound], dtype=bool)
+        donor_present_frames += int(present.sum())
+        donor_absent_frames += int(absent.sum())
+        donor_present_intervals += len(connected_components(present))
+        donor_absent_intervals += len(connected_components(absent))
+    component_lengths = [
+        component.stop - component.start
+        for plan in plans.values()
+        for component in plan.components
+    ]
+    pool_present = int(sum(pool.total_present for pool in donor_cache.values()))
+    pool_absent = int(sum(pool.total_absent for pool in donor_cache.values()))
+    n_test_frames = int(test_mask.size)
+    n_test_support_frames = int(test_mask.sum())
+    return {
+        'n_eligible_test_queries': int(eligibility['n_eligible_windows']),
+        'n_test_support_frames': n_test_support_frames,
+        'test_support_fraction': (
+            float(n_test_support_frames / n_test_frames) if n_test_frames else float('nan')
+        ),
+        'n_test_feature_intervals': len(test_interval_lengths),
+        'mean_test_interval_length': _mean_or_nan(test_interval_lengths),
+        'mean_eligible_component_length': _mean_or_nan(component_lengths),
+        'n_eligible_components': int(len(component_lengths)),
+        'donor_present_frames': donor_present_frames,
+        'donor_absent_frames': donor_absent_frames,
+        'donor_present_intervals': donor_present_intervals,
+        'donor_absent_intervals': donor_absent_intervals,
+        'donor_present_pool_starts': pool_present,
+        'donor_absent_pool_starts': pool_absent,
+        'mean_meg_replaced_fraction': eligibility[
+            'eligible_weighted_fraction_mean'
+        ],
+        'donor_pools_by_length': {
+            str(length): {
+                'total_present': int(pool.total_present),
+                'total_absent': int(pool.total_absent),
+                'same_file_capacity': int(pool.same_file_capacity),
+            }
+            for length, pool in sorted(donor_cache.items())
+        },
+    }
+
+
 def load_reduction_axis(
     hyper_params: dict[str, Any],
 ) -> tuple[str | None, int | None]:
@@ -1960,13 +2112,13 @@ def studentized_mean(values: np.ndarray) -> float:
     return mean / standard_error
 
 
-def one_sided_signflip_max_t(
+def two_sided_signflip_max_abs_t(
     participant_effects: np.ndarray,
     *,
     n_permutations: int,
     seed: int,
 ) -> dict[str, np.ndarray]:
-    """Shared participant sign flips and one-sided single-step max-T FWER."""
+    """Shared participant sign flips and two-sided single-step max-|T| FWER."""
 
     effects = np.asarray(participant_effects, dtype=np.float64)
     if effects.ndim != 2 or effects.shape[0] < 2:
@@ -2000,17 +2152,24 @@ def one_sided_signflip_max_t(
     )
     null_t[(standard_errors == 0) & (means > 0)] = np.inf
     null_t[(standard_errors == 0) & (means < 0)] = -np.inf
-    raw_p = (1 + np.sum(null_t >= observed[None, :], axis=0)) / (n_permutations + 1)
-    max_null = np.max(null_t, axis=1)
-    corrected_p = (1 + np.sum(max_null[:, None] >= observed[None, :], axis=0)) / (
+    observed_abs = np.abs(observed)
+    null_abs = np.abs(null_t)
+    raw_p = (1 + np.sum(null_abs >= observed_abs[None, :], axis=0)) / (
+        n_permutations + 1
+    )
+    max_null = np.max(null_abs, axis=1)
+    corrected_p = (1 + np.sum(max_null[:, None] >= observed_abs[None, :], axis=0)) / (
         n_permutations + 1
     )
     return {
         'observed_t': observed,
+        'observed_abs_t': observed_abs,
         'raw_p': raw_p,
         'max_t_fwer_p': corrected_p,
         'null_mean': means,
         'null_t': null_t,
+        'null_abs_t': null_abs,
+        'max_abs_t_null': max_null,
         'signs': signs,
     }
 
@@ -2060,7 +2219,9 @@ def classify_feature_result(
     if control_saturated:
         conclusion = 'control_saturated'
     elif corrected_p < alpha and mean_effect > 0:
-        conclusion = 'evidence_of_annotation_associated_meg_use'
+        conclusion = 'significant_positive_effect'
+    elif corrected_p < alpha and mean_effect < 0:
+        conclusion = 'significant_negative_effect'
     else:
         conclusion = 'inconclusive'
     return conclusion, random_rank_expectation, control_saturated
@@ -2243,6 +2404,10 @@ def load_completed_result(
                 [
                     output_dir / 'feature_effects.png',
                     output_dir / 'feature_effects.pdf',
+                    output_dir / 'feature_mask_jaccard.csv',
+                    output_dir / 'feature_mask_jaccard.png',
+                    output_dir / 'feature_mask_jaccard.pdf',
+                    output_dir / 'feature_mask_containment.csv',
                 ]
             )
             if save_ranks:
@@ -2515,7 +2680,7 @@ def plot_feature_summary(
 
         # Display the feature-wise sign-flip null in the same rank-difference
         # units as the observed participant effects. Inference still uses all
-        # permutations and the max-T null; only the KDE rendering is thinned to
+        # permutations and the max-|T| null; only the KDE rendering is thinned to
         # keep figure generation fast for the default 100,000 permutations.
         if null_mean_effects is not None:
             visual_stride = max(1, math.ceil(null_mean_effects.shape[0] / 5_000))
@@ -2702,7 +2867,7 @@ def write_plot_style_preview(output_path: Path) -> None:
             for spec in specs
         ]
     )
-    preview_inference = one_sided_signflip_max_t(
+    preview_inference = two_sided_signflip_max_abs_t(
         effect_matrix,
         n_permutations=100_000,
         seed=1701,
@@ -3069,6 +3234,39 @@ def run_analysis(
 
     eligibility_table = pd.DataFrame([asdict(record) for record in eligibility_records])
     atomic_write_csv(output_dir / 'window_eligibility.csv', eligibility_table)
+    feature_diagnostics: dict[str, dict[str, Any]] = {}
+    for spec in feature_specs:
+        feature_diagnostics[spec.name] = summarize_feature_diagnostics(
+            feature_states[spec.name],
+            test_windows=inputs.test_windows,
+            donor_sounds=donor_sounds,
+            plans=feature_plans[spec.name],
+            donor_cache=feature_donor_candidate_caches[spec.name],
+            eligibility=feature_eligibility[spec.name],
+        )
+    test_present_masks = {
+        spec.name: concatenate_test_present_mask(
+            feature_states[spec.name].present,
+            inputs.test_windows,
+        )
+        for spec in feature_specs
+    }
+    jaccard_table, containment_table = pairwise_jaccard(test_present_masks)
+    atomic_write_csv(
+        output_dir / 'feature_mask_jaccard.csv',
+        jaccard_table.reset_index().rename(columns={'index': 'feature'}),
+    )
+    atomic_write_csv(
+        output_dir / 'feature_mask_containment.csv',
+        containment_table.reset_index().rename(columns={'index': 'feature'}),
+    )
+    for suffix in ('png', 'pdf'):
+        final_heatmap = output_dir / f'feature_mask_jaccard.{suffix}'
+        temporary_heatmap = output_dir / (
+            f'.feature_mask_jaccard.{os.getpid()}.{suffix}'
+        )
+        plot_jaccard_heatmap(jaccard_table, temporary_heatmap)
+        temporary_heatmap.replace(final_heatmap)
 
     analyzable_specs = [spec for spec in feature_specs if feature_plans[spec.name]]
     if not analyzable_specs:
@@ -3189,12 +3387,19 @@ def run_analysis(
                     'spec': asdict(spec),
                     'state_metadata': feature_states[spec.name].metadata,
                     'eligibility': feature_eligibility[spec.name],
+                    'diagnostics': feature_diagnostics[spec.name],
                     'result': {
                         'conclusion': 'not_analyzable',
                         'reason': 'no_eligible_windows',
                     },
                 }
                 for spec in feature_specs
+            },
+            'feature_mask_overlap': {
+                'jaccard': 'feature_mask_jaccard.csv',
+                'containment': 'feature_mask_containment.csv',
+                'heatmap': ['feature_mask_jaccard.png', 'feature_mask_jaccard.pdf'],
+                'zero_union': 'jaccard=1 when both masks are empty',
             },
         }
         atomic_write_json(output_dir / 'stats.json', audit_stats)
@@ -3567,12 +3772,12 @@ def run_analysis(
             for name in tested_names
         ]
     )
-    permutation = one_sided_signflip_max_t(
+    permutation = two_sided_signflip_max_abs_t(
         effect_matrix,
         n_permutations=args.n_permutations,
         seed=analysis_seed,
     )
-    max_t_null = np.max(permutation['null_t'], axis=1)
+    max_t_null = permutation['max_abs_t_null']
     max_t_null_probabilities = (0.5, 0.9, 0.95, 0.975, 0.99)
     max_t_null_quantile_values = np.quantile(
         max_t_null,
@@ -3598,8 +3803,11 @@ def run_analysis(
         ci_low, ci_high = participant_t_interval(effects)
         eligibility = feature_eligibility[spec.name]
         control_mean_rank = float(participant['f_to_present_mean_rank'].mean())
+        mean_absent_rank = float(participant['f_to_absent_mean_rank'].mean())
+        mean_baseline_rank = float(participant['baseline_mean_rank'].mean())
         mean_effect = float(np.mean(effects))
         corrected_p = float(permutation['max_t_fwer_p'][feature_index])
+        raw_p = float(permutation['raw_p'][feature_index])
         conclusion, control_saturation_rank, control_saturated = (
             classify_feature_result(
                 mean_effect=mean_effect,
@@ -3608,6 +3816,7 @@ def run_analysis(
                 candidate_bank_size=n_windows,
             )
         )
+        diagnostics = feature_diagnostics[spec.name]
         summary_rows.append(
             {
                 'feature': spec.name,
@@ -3616,7 +3825,8 @@ def run_analysis(
                 'ci95_low': ci_low,
                 'ci95_high': ci_high,
                 'observed_t': float(permutation['observed_t'][feature_index]),
-                'p_raw_one_sided': float(permutation['raw_p'][feature_index]),
+                'observed_abs_t': float(permutation['observed_abs_t'][feature_index]),
+                'p_raw_two_sided': raw_p,
                 'p_max_t_fwer': corrected_p,
                 'mean_rank_absent_damage': float(
                     participant['damage_rank_absent_minus_baseline'].mean()
@@ -3624,9 +3834,9 @@ def run_analysis(
                 'mean_rank_present_damage': float(
                     participant['damage_rank_present_minus_baseline'].mean()
                 ),
-                'mean_eligible_baseline_rank': float(
-                    participant['baseline_mean_rank'].mean()
-                ),
+                'mean_eligible_baseline_rank': mean_baseline_rank,
+                'mean_f_to_absent_rank': mean_absent_rank,
+                'mean_f_to_present_rank': control_mean_rank,
                 'mean_feature_present_control_rank': control_mean_rank,
                 'control_saturation_rank': control_saturation_rank,
                 'control_saturated': control_saturated,
@@ -3636,8 +3846,25 @@ def run_analysis(
                 'mean_weighted_fraction': float(
                     eligibility['eligible_weighted_fraction_mean']
                 ),
+                'mean_meg_replaced_fraction': diagnostics[
+                    'mean_meg_replaced_fraction'
+                ],
                 'n_eligible_windows': int(eligibility['n_eligible_windows']),
                 'n_discarded_windows': int(eligibility['n_discarded_windows']),
+                'n_test_support_frames': diagnostics['n_test_support_frames'],
+                'test_support_fraction': diagnostics['test_support_fraction'],
+                'n_test_feature_intervals': diagnostics['n_test_feature_intervals'],
+                'mean_test_interval_length': diagnostics['mean_test_interval_length'],
+                'mean_eligible_component_length': diagnostics[
+                    'mean_eligible_component_length'
+                ],
+                'n_eligible_components': diagnostics['n_eligible_components'],
+                'donor_present_frames': diagnostics['donor_present_frames'],
+                'donor_absent_frames': diagnostics['donor_absent_frames'],
+                'donor_present_intervals': diagnostics['donor_present_intervals'],
+                'donor_absent_intervals': diagnostics['donor_absent_intervals'],
+                'donor_present_pool_starts': diagnostics['donor_present_pool_starts'],
+                'donor_absent_pool_starts': diagnostics['donor_absent_pool_starts'],
                 'discard_reasons': json.dumps(
                     eligibility['discard_reasons'], sort_keys=True
                 ),
@@ -3691,6 +3918,7 @@ def run_analysis(
             'spec': asdict(spec),
             'state_metadata': feature_states[spec.name].metadata,
             'eligibility': feature_eligibility[spec.name],
+            'diagnostics': feature_diagnostics[spec.name],
             'eligible_wav_indices': sorted(feature_plans[spec.name]),
         }
         if spec.name in summary_by_name.index:
@@ -3811,17 +4039,18 @@ def run_analysis(
             'participants are the inferential units',
         ],
         'inference': {
-            'alternative': 'mean participant effect > 0',
+            'alternative': 'mean participant effect != 0',
             'test': 'shared participant sign flips',
-            'multiple_comparisons': 'one-sided single-step max-T FWER',
+            'multiple_comparisons': 'two-sided single-step max-|T| FWER',
             'n_permutations': int(args.n_permutations),
             'n_participants': int(len(subject_order)),
             'tested_features': tested_names,
-            'max_t_null': {
+            'inferential_units': 'participants',
+            'max_abs_t_null': {
                 'mean': float(np.mean(max_t_null)),
                 'standard_deviation': float(np.std(max_t_null, ddof=1)),
                 'quantiles': max_t_null_quantiles,
-                'fwer_0.05_critical_t': max_t_null_quantiles['q950'],
+                'fwer_0.05_critical_abs_t': max_t_null_quantiles['q950'],
             },
             'control_validity_gate': {
                 'field': 'mean_feature_present_control_rank',
@@ -3829,6 +4058,12 @@ def run_analysis(
                 'random_rank_expectation': float((n_windows + 1) / 2.0),
                 'overrides_positive_conclusion': True,
             },
+        },
+        'feature_mask_overlap': {
+            'jaccard': 'feature_mask_jaccard.csv',
+            'containment': 'feature_mask_containment.csv',
+            'heatmap': ['feature_mask_jaccard.png', 'feature_mask_jaccard.pdf'],
+            'zero_union': 'jaccard=1 when both masks are empty',
         },
         'mask': {
             'padding_ms': float(args.mask_padding_ms),
