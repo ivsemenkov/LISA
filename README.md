@@ -1,9 +1,10 @@
 # LISA: Interpretable MEG-to-Audio Retrieval
 
 <p align="center">
+  <a href="https://doi.org/10.1016/j.neuroimage.2026.122355"><img src="https://img.shields.io/badge/NeuroImage-Published-16816B?style=flat" alt="Read the published paper in NeuroImage"></a>
   <a href="https://arxiv.org/abs/2608.01481"><img src="https://img.shields.io/badge/arXiv-2608.01481-B31B1B?style=flat&amp;logo=arxiv&amp;logoColor=white" alt="Read the paper on arXiv"></a>
   <a href="https://ivsemenkov.github.io/LISA/"><img src="https://img.shields.io/badge/-Project_Website-1F6FEB?style=flat&amp;logo=data%3Aimage%2Fsvg%2Bxml%3Bbase64%2CPHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAyNCAyNCI%2BPGcgZmlsbD0ibm9uZSIgc3Ryb2tlPSIjZmZmIiBzdHJva2Utd2lkdGg9IjIiPjxjaXJjbGUgY3g9IjEyIiBjeT0iMTIiIHI9IjkiLz48cGF0aCBkPSJNMyAxMmgxOE0xMiAzYzMgMyA0LjUgNiA0LjUgOVMxNSAxOCAxMiAyMWMtMy0zLTQuNS02LTQuNS05UzkgNiAxMiAzWiIvPjwvZz48L3N2Zz4%3D" alt="Visit the LISA project website"></a>
-  <a href="https://huggingface.co/papers/2608.01481"><img src="https://img.shields.io/badge/Hugging_Face-%232_Paper_of_the_Day-FFD21E?style=flat&amp;logo=huggingface&amp;logoColor=FFD21E" alt="Hugging Face: #2 Paper of the Day"></a>
+  <a href="https://huggingface.co/papers/2608.01481"><img src="https://img.shields.io/badge/Hugging_Face-Daily_Papers-FFD21E?style=flat&amp;logo=huggingface&amp;logoColor=FFD21E" alt="Hugging Face: Daily Papers"></a>
 </p>
 
 <p align="center">
@@ -22,8 +23,10 @@ code used for the MEG-MASC experiments, together with reusable LISA modules for
 other EEG/MEG tasks.
 
 > **Publication.** This is the official implementation of
-> [*Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the
-> Stimulus Features That Drive Retrieval*](https://arxiv.org/abs/2608.01481). See the
+> [*Interpretable MEG decoding of perceived speech: Source-space patterns and the
+> stimulus features that drive retrieval*](https://doi.org/10.1016/j.neuroimage.2026.122355),
+> published in NeuroImage 344 (2026), 122355. See the
+> [arXiv version](https://arxiv.org/abs/2608.01481) and the
 > [project page](https://ivsemenkov.github.io/LISA/).
 
 ## Start here
@@ -357,19 +360,19 @@ tests/                          unit and regression tests
 If this work helps your research, please cite:
 
 [Semenkov, I., Kleeva, D., Dakhtin, I., Maksudova, Z., & Ossadtchi, A. (2026).
-*Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the
-Stimulus Features That Drive Retrieval*. arXiv:2608.01481
-(cs.LG).](https://arxiv.org/abs/2608.01481)
+*Interpretable MEG decoding of perceived speech: Source-space patterns and the
+stimulus features that drive retrieval*. NeuroImage, 344, 122355.](https://doi.org/10.1016/j.neuroimage.2026.122355)
 
 ```bibtex
-@misc{semenkov2026interpretablemegdecodingperceived,
-      title={Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the Stimulus Features That Drive Retrieval},
-      author={Ilia Semenkov and Daria Kleeva and Ivan Dakhtin and Zarina Maksudova and Alex Ossadtchi},
-      year={2026},
-      eprint={2608.01481},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2608.01481},
+@article{semenkov2026lisa,
+  title = {Interpretable {MEG} decoding of perceived speech: Source-space patterns and the stimulus features that drive retrieval},
+  journal = {NeuroImage},
+  volume = {344},
+  pages = {122355},
+  year = {2026},
+  issn = {1053-8119},
+  doi = {10.1016/j.neuroimage.2026.122355},
+  author = {Ilia Semenkov and Daria Kleeva and Ivan Dakhtin and Zarina Maksudova and Alex Ossadtchi}
 }
 ```
 

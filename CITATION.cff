@@ -1,0 +1,36 @@
+cff-version: 1.2.0
+message: "If you use this software in your research, please cite the preferred article below."
+title: "LISA: Interpretable MEG-to-Audio Retrieval"
+type: software
+authors:
+  - family-names: Semenkov
+    given-names: Ilia
+    orcid: "https://orcid.org/0000-0003-1515-7062"
+repository-code: "https://github.com/ivsemenkov/LISA"
+url: "https://ivsemenkov.github.io/LISA/"
+license: MIT
+preferred-citation:
+  type: article
+  title: "Interpretable MEG decoding of perceived speech: Source-space patterns and the stimulus features that drive retrieval"
+  authors:
+    - family-names: Semenkov
+      given-names: Ilia
+      orcid: "https://orcid.org/0000-0003-1515-7062"
+    - family-names: Kleeva
+      given-names: Daria
+      orcid: "https://orcid.org/0000-0002-6040-2154"
+    - family-names: Dakhtin
+      given-names: Ivan
+      orcid: "https://orcid.org/0000-0003-1667-9006"
+    - family-names: Maksudova
+      given-names: Zarina
+      orcid: "https://orcid.org/0009-0004-8681-5848"
+    - family-names: Ossadtchi
+      given-names: Alex
+      orcid: "https://orcid.org/0000-0001-8827-9429"
+  journal: NeuroImage
+  volume: 344
+  year: 2026
+  issn: "1053-8119"
+  doi: "10.1016/j.neuroimage.2026.122355"
+  start: 122355

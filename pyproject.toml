@@ -101,6 +101,7 @@ dev = [
 ]
 
 [project.urls]
+Publication = "https://doi.org/10.1016/j.neuroimage.2026.122355"
 Homepage = "https://ivsemenkov.github.io/LISA/"
 Documentation = "https://ivsemenkov.github.io/LISA/"
 Repository = "https://github.com/ivsemenkov/LISA"

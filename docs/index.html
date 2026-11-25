@@ -6,15 +6,15 @@
   <meta name="theme-color" content="#102a30">
   <meta name="description" content="LISA is a compact, interpretable neural decoder for retrieving perceived speech from non-invasive MEG recordings.">
   <meta property="og:type" content="website">
-  <meta property="og:title" content="Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the Stimulus Features That Drive Retrieval">
-  <meta property="og:description" content="A compact MEG-to-audio decoder whose learned weights map back to cortical sources and temporal dynamics.">
+  <meta property="og:title" content="Interpretable MEG Decoding of Perceived Speech: Source-Space Patterns and the Stimulus Features That Drive Retrieval">
+  <meta property="og:description" content="A compact MEG-to-audio decoder with interpretable spatial and temporal patterns and approximate cortical source projections.">
   <meta property="og:image" content="https://ivsemenkov.github.io/LISA/assets/architecture.png">
   <meta property="og:url" content="https://ivsemenkov.github.io/LISA/">
   <meta name="twitter:card" content="summary_large_image">
   <link rel="canonical" href="https://ivsemenkov.github.io/LISA/">
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns=%22http://www.w3.org/2000/svg%22%20viewBox=%220%200%2064%2064%22%3E%3Crect%20width=%2264%22%20height=%2264%22%20rx=%2216%22%20fill=%22%23102a30%22/%3E%3Cpath%20d=%22M18%2015v34h28v-8H27V15z%22%20fill=%22%23f5c26b%22/%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
-  <title>Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the Stimulus Features That Drive Retrieval | LISA</title>
+  <title>Interpretable MEG Decoding of Perceived Speech: Source-Space Patterns and the Stimulus Features That Drive Retrieval | LISA</title>
 </head>
 <body id="top">
   <a class="skip-link" href="#main-content">Skip to content</a>
@@ -35,7 +35,7 @@
         <a href="#findings">Findings</a>
         <a href="#resources">Resources</a>
         <a href="#citation">Citation</a>
-        <a class="nav-paper" href="https://arxiv.org/abs/2608.01481">Publication</a>
+        <a class="nav-paper" href="https://doi.org/10.1016/j.neuroimage.2026.122355">Publication</a>
       </nav>
     </div>
   </header>
@@ -46,10 +46,10 @@
       <div class="hero-orbit orbit-two" aria-hidden="true"></div>
       <div class="shell hero-grid">
         <div class="hero-copy">
-          <p class="eyebrow"><span>Research project</span> MEG · Speech · Interpretability</p>
-          <h1 id="hero-title">Interpretable MEG Decoding of <em>Perceived Speech</em>:<span class="hero-title-detail"> Cortical Sources and the Stimulus Features That Drive Retrieval</span></h1>
+          <p class="eyebrow"><span>Published in NeuroImage · 2026</span> MEG · Speech · Interpretability</p>
+          <h1 id="hero-title">Interpretable MEG Decoding of <em>Perceived Speech</em>:<span class="hero-title-detail"> Source-Space Patterns and the Stimulus Features That Drive Retrieval</span></h1>
           <p class="hero-lead">
-            LISA is a compact neural decoder that retrieves heard speech from brain activity and keeps a path back to the cortical sources, temporal dynamics, and stimulus features behind each decision.
+            LISA is a compact neural decoder that retrieves heard speech from brain activity, with an interpretable front end for estimating spatial and temporal patterns and paired input interventions for probing stimulus-associated information.
           </p>
           <div class="authors" role="group" aria-label="Authors">
             <a href="https://orcid.org/0000-0003-1515-7062">Ilia Semenkov</a>
@@ -60,9 +60,13 @@
           </div>
           <p class="affiliations">AXXX · HSE University · ITMO University</p>
           <div class="hero-actions">
-            <a class="button button-primary" href="https://arxiv.org/abs/2608.01481">
+            <a class="button button-primary" href="https://doi.org/10.1016/j.neuroimage.2026.122355">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 2h8l4 4v16H6zM14 2v5h5M9 13h6M9 17h6"/></svg>
-              Publication
+              NeuroImage
+            </a>
+            <a class="button button-secondary" href="https://arxiv.org/abs/2608.01481">
+              <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 2h8l4 4v16H6zM14 2v5h5M9 13h6M9 17h6"/></svg>
+              arXiv
             </a>
             <a class="button button-secondary" href="#citation">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 2h8l4 4v16H6zM14 2v5h5M9 13h6M9 17h6"/></svg>
@@ -73,10 +77,10 @@
               View code
             </a>
           </div>
-          <a class="paper-accolade" href="https://huggingface.co/papers/2608.01481" aria-label="#2 Paper of the Day on Hugging Face">
+          <a class="paper-accolade" href="https://huggingface.co/papers/2608.01481" aria-label="LISA on Hugging Face Daily Papers">
             <span class="paper-accolade-mark" aria-hidden="true">🤗</span>
             <span class="paper-accolade-label">Hugging Face</span>
-            <strong>#2 Paper of the Day</strong>
+            <strong>Daily Papers</strong>
             <span aria-hidden="true">↗</span>
           </a>
         </div>
@@ -141,7 +145,7 @@
           <article>
             <p class="argument-label">LISA’s answer</p>
             <h3>Make the evidence readable by construction.</h3>
-            <p>LISA uses a physically grounded, factorized front end whose spatial and temporal weights can be converted into source patterns and dynamics. Paired MEG interventions then test which properties of the speech stream actually support retrieval.</p>
+            <p>LISA uses a physically grounded, factorized front end whose learned weights can be used to estimate source-space and temporal patterns. Paired MEG interventions then probe which stimulus-associated information supports retrieval.</p>
           </article>
         </div>
       </div>
@@ -206,11 +210,11 @@
         <article class="finding-wide finding-sources">
           <div class="finding-copy">
             <p class="finding-index">Finding 01</p>
-            <h3>Learned patterns recover bilateral cortical structure.</h3>
+            <h3>Learned patterns reveal recurrent bilateral source-space structure.</h3>
             <p>Candidate source locations are distributed bilaterally over lateral cortex. The densest concentrations are around temporal and adjacent peri-Sylvian regions, with sparser locations elsewhere, and the distributed source maps show that same lateral temporal and peri-Sylvian structure. Longer temporal support resolves secondary components near 8–17 Hz in both hemispheres.</p>
             <ul class="plain-list">
               <li>Spatial filters are converted to activation patterns.</li>
-              <li>Temporal kernels reveal branch-specific dynamics.</li>
+              <li>Learned temporal filters support branch-specific temporal pattern estimation.</li>
               <li>Source estimates land on a shared cortical template.</li>
             </ul>
           </div>
@@ -243,9 +247,9 @@
         <article class="finding-wide finding-features">
           <div class="finding-copy">
             <p class="finding-index">Finding 02</p>
-            <h3>The decoder relies most on acoustic state and transitions.</h3>
-            <p>Paired MEG occlusion compares matched replacements drawn from feature-present and feature-absent intervals. Fifteen of nineteen tested features contribute reliably; silence, sound intensity, vowels, and acoustic onsets produce the largest effects.</p>
-            <p class="finding-note"><strong>A revealing reversal:</strong> random word lists are significantly negative. Replacing that activity with narrative MEG improves retrieval.</p>
+            <h3>The largest occlusion effects occur for acoustic state and transitions.</h3>
+            <p>Paired MEG occlusion compares matched replacements drawn from feature-present and feature-absent intervals. Fifteen of nineteen tested features show significant positive effects; silence, sound intensity, vowels, and acoustic onsets produce the largest effects. Effect magnitudes are not directly comparable as measures of encoding strength because the feature masks differ in duration and coverage.</p>
+            <p class="finding-note"><strong>A revealing reversal:</strong> random word lists show a significant negative effect. Replacing word-list MEG with MEG recorded during coherent narrative improves retrieval relative to word-list donor MEG; this contrast does not isolate narrative structure alone.</p>
           </div>
           <figure class="paper-figure feature-figure">
             <div class="figure-viewport media-frame">
@@ -261,8 +265,8 @@
           <div class="finding-copy compact-copy">
             <p class="finding-index">Finding 03</p>
             <h3>The recoverable target space is surprisingly small.</h3>
-            <p>A projection learned with the retrieval objective compresses the 768-dimensional wav2vec 2.0 target to about twelve dimensions with essentially no loss. Unsupervised PCA degrades much sooner, showing that MEG-relevant directions are not simply the directions of greatest audio variance.</p>
-            <div class="mini-stat"><strong>64×</strong><span>feature compression<br>without accuracy loss</span></div>
+            <p>A projection learned with the retrieval objective compresses the 768-dimensional wav2vec 2.0 target to about twelve dimensions with only a small loss in retrieval accuracy. Unsupervised PCA degrades much sooner, showing that MEG-relevant directions are not simply the directions of greatest audio variance.</p>
+            <div class="mini-stat"><strong>64×</strong><span>feature compression<br>with minimal accuracy loss</span></div>
           </div>
           <figure class="paper-figure compression-figure">
             <div class="figure-viewport media-frame">
@@ -299,9 +303,14 @@
           <h2 id="resources-title">Read, reproduce, and adapt.</h2>
         </div>
         <div class="resource-list">
+          <a href="https://doi.org/10.1016/j.neuroimage.2026.122355">
+            <span class="resource-type">DOI</span>
+            <span><strong>Publication in NeuroImage</strong><small>Volume 344 (2026) · Article 122355</small></span>
+            <i aria-hidden="true">↗</i>
+          </a>
           <a href="https://arxiv.org/abs/2608.01481">
             <span class="resource-type">PDF</span>
-            <span><strong>Publication</strong><small>Semenkov et al. (2026) · arXiv:2608.01481</small></span>
+            <span><strong>arXiv</strong><small>arXiv:2608.01481</small></span>
             <i aria-hidden="true">↗</i>
           </a>
           <a href="https://github.com/ivsemenkov/LISA">
@@ -341,15 +350,16 @@
               <span aria-live="polite">Copy BibTeX</span>
             </button>
           </div>
-          <p class="citation-reference"><a href="https://arxiv.org/abs/2608.01481">Semenkov, I., Kleeva, D., Dakhtin, I., Maksudova, Z., &amp; Ossadtchi, A. (2026). <cite>Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the Stimulus Features That Drive Retrieval.</cite> arXiv:2608.01481 [cs.LG].</a></p>
-          <pre id="bibtex-citation"><code>@misc{semenkov2026interpretablemegdecodingperceived,
-      title={Interpretable MEG Decoding of Perceived Speech: Cortical Sources and the Stimulus Features That Drive Retrieval},
-      author={Ilia Semenkov and Daria Kleeva and Ivan Dakhtin and Zarina Maksudova and Alex Ossadtchi},
-      year={2026},
-      eprint={2608.01481},
-      archivePrefix={arXiv},
-      primaryClass={cs.LG},
-      url={https://arxiv.org/abs/2608.01481},
+          <p class="citation-reference"><a href="https://doi.org/10.1016/j.neuroimage.2026.122355">Semenkov, I., Kleeva, D., Dakhtin, I., Maksudova, Z., &amp; Ossadtchi, A. (2026). <cite>Interpretable MEG decoding of perceived speech: Source-space patterns and the stimulus features that drive retrieval.</cite> NeuroImage, 344, 122355.</a></p>
+          <pre id="bibtex-citation"><code>@article{semenkov2026lisa,
+  title = {Interpretable {MEG} decoding of perceived speech: Source-space patterns and the stimulus features that drive retrieval},
+  journal = {NeuroImage},
+  volume = {344},
+  pages = {122355},
+  year = {2026},
+  issn = {1053-8119},
+  doi = {10.1016/j.neuroimage.2026.122355},
+  author = {Ilia Semenkov and Daria Kleeva and Ivan Dakhtin and Zarina Maksudova and Alex Ossadtchi}
 }</code></pre>
         </div>
       </div>
